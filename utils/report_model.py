@@ -1,7 +1,7 @@
 """報表資料模型：PDF（HTML 範本／ReportLab）與 Excel 共用同一份內容，確保三種輸出一致。
 
 版面依 rc-member-designer 計算書慣例：
-表頭（標題＋兩欄資料表＋程式版本／雜湊）→ 編號章節 → 檢核彙總與總判定 → 附註 → 簽核欄（審查／校核／審核）。
+表頭（標題＋兩欄資料表＋程式版本／雜湊）→ 編號章節 → 檢核彙總與總判定 → 附註 → 簽核欄（設計／校核／審核）。
 判定用語亦一致：OK／注意／NG。
 """
 
@@ -17,7 +17,7 @@ from version import __version__
 REPORT_TITLE = "結構計算書審查報告"
 CODE_BASIS = "建築物混凝土結構設計規範（土木401-112）＋ 建築物耐震設計規範及解說（113 年版）＋ 建築技術規則建築構造編"
 REVIEW_METHOD = "AI 雙重詰問審查：外審質疑 → 設計回覆 → 外審終審（三回合）＋ 主任檢核技師彙整裁決"
-SIGN_ROLES = ("審查", "校核", "審核")
+SIGN_ROLES = ("設計", "校核", "審核")
 
 JUDGE = {S.RiskLevel.PASS: "OK", S.RiskLevel.MEDIUM: "注意", S.RiskLevel.HIGH: "NG"}
 PRECHECK_JUDGE = {"High": "NG", "Medium": "注意", "Info": "參考"}

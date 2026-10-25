@@ -58,6 +58,11 @@ def test_mock_pipeline_end_to_end(summary):
     events = []
     s = ReviewOrchestrator(MockClient(), on_progress=lambda a, b: events.append(a)).run(summary)
     assert events == ["round1", "round2", "round3", "chief", "done"]
+    # 對話紀錄：B 初審意見＋逐項質疑 → A 逐項回覆 → B 逐項終審 → C 裁決
+    n = len(s.issue_ids)
+    assert [(x.agent, x.stage) for x in s.transcript] == (
+        [("B", "round1")] * (n + 1) + [("A", "round2")] * n + [("B", "round3")] * n + [("C", "chief")]
+    )
     assert 3 <= len(s.issue_ids) <= 5
     assert len(s.round2.responses) == len(s.round3.verdicts) == len(s.issue_ids)
     placed = [i.issue_id for b in (s.chief.no_concern_items, s.chief.major_doubts,

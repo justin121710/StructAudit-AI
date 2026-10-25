@@ -27,20 +27,31 @@ streamlit run app.py
 API Key 可在介面輸入，或用環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`、`.streamlit/secrets.toml`（參考 `secrets.toml.example`）。
 模型名稱可在介面修改，或以 `GEMINI_MODEL`／`OPENAI_MODEL` 設定預設值；`OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
 
-## 與 rc-member-designer 一致的報表與介面
+## 介面與審查對話
 
-報表與介面沿用 [rc-member-designer](https://github.com/justin121710/rc-member-designer)（RC 構件設計工具）的格式，
-兩套工具產出的計算書／審查報告可以並排送審。
+介面只保留四個步驟：設定（LLM、摘要檔、專案資料、初篩門檻）→ 規則式初篩 → 開始審查 → 結論與下載（PDF／Excel／JSON）。
+按下「開始審查」後，三個 Agent 的發言會依回合即時顯示在「審查對話」：
+
+1. Round 1：外部審查專家（B）的初審意見與逐項質疑（含算式與依據）
+2. Round 2：原設計工程師（A）逐項回覆（承認缺失／規範依據抗辯／計算推導抗辯）
+3. Round 3：外部審查專家（B）逐項終審（接受／部分接受／駁回＋風險等級）
+4. 彙整：主任檢核技師（C）的總結論
+
+對話紀錄同時保存在 JSON 的 `transcript` 欄位。
+
+## 與 rc-member-designer 一致的風格
+
+報表與介面配色沿用 [rc-member-designer](https://github.com/justin121710/rc-member-designer)（RC 構件設計工具）：
 
 | 項目 | 對齊內容 |
 |---|---|
-| A4 報告（PDF／HTML） | 標題列（左標題、右案名）＋兩欄式表頭、「程式版本／雜湊」（版本＋輸入檔 SHA-256）、粗底線編號章節、灰底鍵值表、「1.0 …之依據」表、「檢核彙總與總判定」表＋總判定框、附註與「未涵蓋、須另行檢核」、簽核欄（審查／校核／審核）、頁尾「第 n 頁／共 N 頁」 |
+| A4 報告（PDF） | 標題列＋兩欄式表頭、「程式版本／雜湊」、粗底線編號章節、「檢核彙總與總判定」表＋總判定框、附註、簽核欄（設計／校核／審核）、頁尾頁碼 |
 | 判定用語 | OK／注意／NG（對應風險等級 Pass／Medium／High） |
-| Excel 報表 | 「檢核表」（七欄、凍結表頭、A3 橫向）＋「審查報告(A4)」（一、二、三…章節、A4 直向）；v2 色碼：表頭 `D9E1F2`、分節 `F2F2F2`、整體判定淺琥珀 `FFF2CC`、輸入資料淺藍底藍框藍字；Arial；頁尾日期與頁碼 |
-| 介面 | 冷灰底白卡、深青強調色 `#0F5F6B`、語意色 ok／warn／bad 與強調色分開；頂列（品名＋設定摘要＋審查戳記）、狀態列判定膠囊、左輸入欄＋右分頁工作區、A4 報告預覽 |
-| 規範條號 | 初篩引用之條號已對照 rc-member-designer `specs/` 內的規範原文（土木401-112、建築物耐震設計規範及解說 113 年版） |
+| Excel 報表 | 「檢核表」＋「審查報告(A4)」；表頭 `D9E1F2`、分節 `F2F2F2`、整體判定淺琥珀 `FFF2CC`；Arial |
+| 介面 | 冷灰底白卡、深青強調色 `#0F5F6B`（`.streamlit/config.toml`） |
+| 規範條號 | 初篩條號已對照 rc-member-designer `specs/` 內的規範原文 |
 
-PDF、HTML、Excel 共用 `utils/report_model.py` 的同一份報表資料，內容一致。
+PDF 與 Excel 共用 `utils/report_model.py` 的同一份報表資料，內容一致。
 
 ## 專案結構
 
@@ -101,7 +112,6 @@ tests/                     pytest
 - **PDF**：WeasyPrint 依 `templates/report_template.html` 排版；若系統缺少 Pango，自動改用 ReportLab
   依同一份報表資料產生相同章節的 PDF（會自動尋找系統中文字型嵌入）。WeasyPrint 需要中文字型，Linux 可安裝 `fonts-noto-cjk`。
 - **Excel**：模型輸出以「=」開頭時一律存成文字，不會被 Excel 當成公式執行。
-- **報告預覽**：以 `data:` URL 載入 iframe，與介面不同源；模型輸出在範本中已跳脫。
 
 ## 測試
 

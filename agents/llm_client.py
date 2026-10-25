@@ -160,15 +160,18 @@ class MockClient(LLMClient):
 
     provider = "mock"
 
-    def __init__(self, model: str | None = None, **kw):
+    def __init__(self, model: str | None = None, delay: float = 0.0, **kw):
         super().__init__(model, **kw)
         self._severity: dict[str, str] = {}
+        self.delay = delay  # 每次呼叫的模擬延遲（秒），供介面示範逐回合顯示
 
     def _complete(self, system: str, user: str, temperature: float) -> str:  # pragma: no cover
         raise NotImplementedError
 
     def generate(self, system, user, schema, *, temperature=0.3, task="", payload=None):
         payload = payload or {}
+        if self.delay:
+            time.sleep(self.delay)
         builder = getattr(self, f"_mock_{task}", None)
         if builder is None:
             raise LLMError(f"Mock 不支援 task={task!r}")

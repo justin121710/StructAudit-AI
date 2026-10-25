@@ -219,7 +219,7 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
     story.append(P("\n".join(lines), note))
     story.append(P("本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。", note))
 
-    # 簽核欄（審查／校核／審核）
+    # 簽核欄（設計／校核／審核）
     sign = Table([[B(r) for r in m.sign_roles], [""] * 3, [P("日期：")] * 3],
                  colWidths=[width / 3] * 3, rowHeights=[None, 16 * mm, None])
     sign.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, grid_c), ("BACKGROUND", (0, 0), (-1, 0), head_c),

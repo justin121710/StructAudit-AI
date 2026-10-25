@@ -12,7 +12,10 @@ def test_offline_review_flow(monkeypatch):
     at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
     at.run()
     assert not at.exception
-    assert [t.label for t in at.tabs] == ["前處理與初篩"]
+    assert not at.chat_message
     at.button(key="run").click().run()
     assert not at.exception
-    assert [t.label for t in at.tabs] == ["結果摘要", "詰問歷程", "預覽報告", "前處理與初篩", "原始 JSON"]
+    session = at.session_state["review"]
+    # 每則 Agent 發言都顯示在對話區，且完成後提供 PDF／Excel／JSON 下載
+    assert len(at.chat_message) == len(session.transcript) > 0
+    assert len(at.get("download_button")) == 3

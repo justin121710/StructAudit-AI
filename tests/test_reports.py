@@ -25,7 +25,7 @@ def test_model_header_and_traceability(session):
     # 兩欄式表頭：跨欄項目自成一列，其餘每列兩項
     for row in meta_rows(m.meta):
         assert 1 <= len(row) <= 2
-    assert m.sign_roles == ("審查", "校核", "審核")
+    assert m.sign_roles == ("設計", "校核", "審核")
 
 
 def test_model_judgement_matches_chief(session):
@@ -55,4 +55,4 @@ def test_xlsx_layout_and_formula_guard(session):
     assert total and total[0][0].fill.fgColor.rgb.endswith("FFF2CC")
     a4 = wb["審查報告(A4)"]
     texts = [c.value for row in a4.iter_rows() for c in row if isinstance(c.value, str)]
-    assert "一、審查依據" in texts and "五、檢核彙總" in texts and "審查" in texts
+    assert "一、審查依據" in texts and "五、檢核彙總" in texts and "設計" in texts

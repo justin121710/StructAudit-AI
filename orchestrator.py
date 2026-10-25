@@ -36,6 +36,25 @@ BUCKET_RISK = {
 }
 
 ProgressCallback = Callable[[str, str], None]
+MessageCallback = Callable[["DialogueMessage"], None]
+
+
+@dataclass
+class DialogueMessage:
+    """審查對話中的一則發言（以疑義為單位），供介面即時顯示與報告保存。"""
+
+    agent: str  # A／B／C
+    stage: str  # round1／round2／round3／chief
+    title: str
+    body: str  # Markdown
+
+    @property
+    def speaker(self) -> str:
+        return AGENT_NAMES[self.agent]
+
+    def to_dict(self) -> dict:
+        return {"agent": self.agent, "speaker": self.speaker, "stage": self.stage,
+                "title": self.title, "body": self.body}
 
 
 @dataclass
@@ -52,6 +71,7 @@ class ReviewSession:
     round3: S.Round3Output | None = None
     chief: S.ChiefReport | None = None
     notes: list[str] = field(default_factory=list)
+    transcript: list[DialogueMessage] = field(default_factory=list)
 
     @property
     def issue_ids(self) -> list[str]:
@@ -79,6 +99,7 @@ class ReviewSession:
             "round2_responses": dump(self.round2),
             "round3_verdicts": dump(self.round3),
             "chief_report": dump(self.chief),
+            "transcript": [msg.to_dict() for msg in self.transcript],
             "notes": self.notes,
         }
 
@@ -116,6 +137,7 @@ class ReviewOrchestrator:
         self,
         client: LLMClient | dict[str, LLMClient],
         on_progress: ProgressCallback | None = None,
+        on_message: MessageCallback | None = None,
     ):
         """client 可為單一 LLMClient（三個 Agent 共用），或 {"A":…, "B":…, "C":…} 分別指定。"""
         if isinstance(client, dict):
@@ -123,6 +145,12 @@ class ReviewOrchestrator:
         else:
             self.clients = {"A": client, "B": client, "C": client}
         self.on_progress = on_progress or (lambda stage, msg: None)
+        self.on_message = on_message or (lambda msg: None)
+
+    def _say(self, s: ReviewSession, agent: str, stage: str, title: str, body: str) -> None:
+        msg = DialogueMessage(agent, stage, title, body)
+        s.transcript.append(msg)
+        self.on_message(msg)
 
     # ------------------------------------------------------------------
     def run(self, summary: StructuralSummary, project_info: dict | None = None) -> ReviewSession:
@@ -166,6 +194,10 @@ class ReviewOrchestrator:
         for n, issue in enumerate(out.issues, 1):
             issue.issue_id = f"Q{n}"
         s.round1 = out
+        self._say(s, "B", "round1", "初審意見", out.summary)
+        for i in out.issues:
+            self._say(s, "B", "round1", f"{i.issue_id} {i.title}（{i.category}）",
+                      f"{i.challenge}\n\n`{i.formula}`\n\n引用數據：{i.cited_data}｜依據：{i.code_reference}")
 
     def round2(self, s: ReviewSession) -> None:
         self.on_progress("round2", f"Round 2｜{AGENT_NAMES['A']} 逐項回覆中…")
@@ -195,6 +227,13 @@ class ReviewOrchestrator:
                 s.notes.append(f"Agent A 未回覆 {qid}，系統以「未能抗辯」補記。")
         out.responses = self._ordered(out.responses, s.issue_ids)
         s.round2 = out
+        titles = {i.issue_id: i.title for i in s.round1.issues}
+        for r in out.responses:
+            body = r.response
+            body += f"\n\n`{r.calculation}`" if r.calculation else ""
+            body += f"\n\n修正方案：{r.proposed_action}" if r.proposed_action else ""
+            body += f"\n\n數據出處：{r.data_source}｜規範依據：{r.code_reference}"
+            self._say(s, "A", "round2", f"{r.issue_id} {titles[r.issue_id]}｜{r.stance.value}", body)
 
     def round3(self, s: ReviewSession) -> None:
         self.on_progress("round3", f"Round 3｜{AGENT_NAMES['B']} 覆核終審中…")
@@ -221,6 +260,10 @@ class ReviewOrchestrator:
                 s.notes.append(f"Agent B 未判定 {qid}，系統列為待複核。")
         out.verdicts = self._ordered(out.verdicts, s.issue_ids)
         s.round3 = out
+        titles = {i.issue_id: i.title for i in s.round1.issues}
+        for v in out.verdicts:
+            body = v.rationale + (f"\n\n應辦事項：{v.required_action}" if v.required_action else "")
+            self._say(s, "B", "round3", f"{v.issue_id} {titles[v.issue_id]}｜{v.decision.value}（{v.risk_level.value}）", body)
 
     def chief(self, s: ReviewSession) -> None:
         self.on_progress("chief", f"彙整｜{AGENT_NAMES['C']} 裁決中…")
@@ -234,6 +277,13 @@ class ReviewOrchestrator:
         }
         report: S.ChiefReport = self._call("C", P.AGENT_C_SYSTEM, user, S.ChiefReport, "chief", payload)
         s.chief = self._normalize_report(report, s)
+        c = s.chief
+        lines = [c.executive_summary]
+        for label, items in (("重大疑義", c.major_doubts), ("待複核", c.pending_review_items),
+                             ("無虞", c.no_concern_items)):
+            if items:
+                lines.append(f"**{label}**：" + "、".join(f"{i.issue_id} {i.title}" for i in items))
+        self._say(s, "C", "chief", f"總結論：{c.overall_conclusion.value}", "\n\n".join(lines))
 
     # ------------------------------------------------------------------
     def _normalize_report(self, report: S.ChiefReport, s: ReviewSession) -> S.ChiefReport:
