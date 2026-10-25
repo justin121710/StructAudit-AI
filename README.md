@@ -16,6 +16,11 @@
  Streamlit 介面 ──► PDF（WeasyPrint，備援 ReportLab）／Excel／HTML／JSON 下載
 ```
 
+## 線上部署
+
+要讓別人用網址直接開啟（不需安裝 Python），請依 [docs/DEPLOY.md](docs/DEPLOY.md) 部署到 Streamlit Community Cloud（免費）。
+`packages.txt` 已列出 PDF 排版所需的系統套件與中文字型。
+
 ## 快速開始
 
 ```bash
