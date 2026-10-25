@@ -5,3 +5,4 @@ __pycache__/
 .env
 .streamlit/secrets.toml
 *.pdf
+!examples/sample_C1_calc.pdf

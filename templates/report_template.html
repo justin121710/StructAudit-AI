@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>{{ m.title }}｜{{ m.project_name or m.report_no }}</title>
 <style>
-/* 版面沿用 rc-member-designer 計算書：白底黑字、粗底線章節、灰底表頭、OK／注意／NG 判定、設計（審查）／校核／審核簽核欄 */
+/* 版面沿用 rc-member-designer 計算書：白底黑字、粗底線章節、灰底表頭、OK／注意／NG 判定、LaTeX 算式、設計／校核／審核簽核欄 */
 @page{size:A4 portrait;margin:14mm 12mm 16mm;
   font-family:"Noto Sans TC","Noto Sans CJK TC","Microsoft JhengHei","PingFang TC","WenQuanYi Zen Hei",sans-serif;
   @bottom-left{content:"{{ m.report_no }}";font-size:8pt;color:#666}
@@ -21,12 +21,10 @@ body{font-family:"Noto Sans TC","Noto Sans CJK TC","Microsoft JhengHei","PingFan
     box-shadow:0 1px 2px rgba(21,28,36,.07)}
 }
 table{border-collapse:collapse;width:100%;font-size:12px;margin:0 0 6px}
-th,td{border:1px solid #999;padding:5px 9px;text-align:right;vertical-align:top}
-th{background:#eee;text-align:center;font-weight:700}
-td.l,th.l{text-align:left}
+th,td{border:1px solid #999;padding:5px 9px;text-align:left;vertical-align:top}
+th{background:#eee;text-align:center;font-weight:700;white-space:nowrap}
 td.c,th.c{text-align:center}
 td.c{white-space:nowrap}
-th{white-space:nowrap}
 tr{break-inside:avoid;page-break-inside:avoid}
 table.rp-dense{font-size:11px}
 table.rp-dense th,table.rp-dense td{padding:3px 5px}
@@ -38,28 +36,55 @@ table.rp-dense th,table.rp-dense td{padding:3px 5px}
 table.rp-meta{margin:0 0 12px}
 table.rp-meta th,table.rp-meta td{border:0;border-bottom:1px solid #ddd;padding:3px 8px;text-align:left;background:none}
 table.rp-meta th{font-weight:700;white-space:nowrap;width:1%;color:#333}
-table.rp-kv td:nth-child(odd){font-weight:700;background:#f2f2f2;text-align:left;white-space:nowrap;width:1%}
-table.rp-kv td:nth-child(even){text-align:left}
+table.rp-kv td:nth-child(odd){font-weight:700;background:#f2f2f2;white-space:nowrap;width:1%}
 .rp-h2{font-size:14px;font-weight:800;margin:18px 0 7px;border-bottom:2px solid #333;padding-bottom:3px;
   break-after:avoid;page-break-after:avoid}
 .rp-h3{font-size:12.5px;font-weight:700;margin:12px 0 5px;break-after:avoid;page-break-after:avoid}
-.rp-eq{margin:3px 0 3px 12px;font-family:"Times New Roman","Noto Serif CJK TC",serif;font-size:1.05em;white-space:pre-wrap}
+.rp-h4{font-size:12px;font-weight:700;margin:8px 0 3px;break-after:avoid;page-break-after:avoid}
+.rp-eq{margin:3px 0 3px 12px;break-inside:avoid;page-break-inside:avoid}
+.rp-eq img.tex{vertical-align:middle;height:auto}
+.rp-eq code{font-family:"Times New Roman","Noto Serif CJK TC",serif;font-size:1.05em;white-space:pre-wrap}
 .rp-note{font-size:11px;color:#444;margin:4px 0 4px 14px;line-height:1.6}
 .rp-src{font-size:11px;color:#444;margin-top:2px}
+.rp-clause{font-size:10.5px;color:#222;white-space:pre-wrap;margin:2px 0 8px 12px;line-height:1.5}
 .no-break{break-inside:avoid;page-break-inside:avoid}
 .ng{font-weight:700}
+.tag{display:inline-block;border:1px solid #999;border-radius:3px;padding:0 5px;font-size:10.5px;margin-right:4px}
+.tag.bad{border-color:#c00;color:#c00;font-weight:700}
+.tag.warn{border-color:#9A5E10;color:#9A5E10}
 .verdict{font-size:14px;font-weight:800;padding:8px;margin:6px 0;border:2px solid #060;display:inline-block}
 .verdict.bad{border-color:#c00}
 .verdict.warn{border-color:#9A5E10}
 .rp-sign{margin:22px 0 0}
 .rp-sign table{table-layout:fixed}
 .rp-sign tr.sg td{height:56px}
-.rp-thread td:first-child{width:27mm;font-weight:700;background:#f2f2f2;text-align:left}
-.rp-thread td{text-align:left}
+.rp-thread td:first-child{width:27mm;font-weight:700;background:#f2f2f2}
+.rp-sol{border:1px solid #bbb;border-left:3px solid #0F5F6B;padding:6px 10px;margin:4px 0 8px;break-inside:avoid;page-break-inside:avoid}
+.rp-sol.rec{border-left-color:#060}
+a{color:#0F5F6B}
 </style>
 </head>
 <body>
 <div id="report">
+
+{% macro tags(risk) -%}
+<span class="tag {{ {'高風險':'bad','中風險':'warn'}.get(risk, '') }}">{{ risk }}</span>
+{%- endmacro %}
+
+{% macro solution(sol, rec=False) -%}
+<div class="rp-sol{% if rec %} rec{% endif %}">
+  <div><b>{% if rec %}建議採用｜{% endif %}{{ sol.label }}</b></div>
+  <div>做法：{{ sol.approach }}</div>
+  <div>改動幅度：{{ sol.change_extent }}</div>
+  {% if sol.changes %}
+  <table class="rp-dense"><thead><tr><th>rc-member-designer 欄位</th><th>參數</th><th>目前值</th><th>建議值</th><th>單位</th></tr></thead><tbody>
+  {% for c in sol.changes %}<tr><td class="c">{{ c.param_id or '—' }}</td><td>{{ c.label }}</td><td class="c">{{ c.current }}</td><td class="c"><b>{{ c.proposed }}</b></td><td class="c">{{ c.unit }}</td></tr>{% endfor %}
+  </tbody></table>{% endif %}
+  <div>修正後驗算：</div>{{ sol.verification | tex }}
+  {% if sol.tool_steps %}<div class="rp-src">工具操作：{{ sol.tool_steps }}</div>{% endif %}
+  {% if sol.other_method %}<div class="rp-src">其他作法：{{ sol.other_method }}</div>{% endif %}
+</div>
+{%- endmacro %}
 
 {# ---------------- 表頭 ---------------- #}
 <div class="rp-title">
@@ -67,7 +92,7 @@ table.rp-kv td:nth-child(even){text-align:left}
     <rect x="4.2" y="4.2" width="23.6" height="23.6" fill="none" stroke="currentColor" stroke-width="2"/>
     <circle cx="9" cy="9" r="1.75" fill="currentColor"/><circle cx="23" cy="9" r="1.75" fill="currentColor"/><circle cx="9" cy="23" r="1.75" fill="currentColor"/>
     <path d="M13.5 17.2l3 3 6-7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>{{ m.title }}</div>
-  {% if m.project_name %}<div class="rp-mem">案名：<b>{{ m.project_name }}</b></div>{% endif %}
+  {% if m.project_name %}<div class="rp-mem"><b>{{ m.project_name }}</b></div>{% endif %}
 </div>
 <table class="rp-meta"><tbody>
 {% for row in meta_rows %}
@@ -81,76 +106,100 @@ table.rp-kv td:nth-child(even){text-align:left}
 <table class="rp-kv no-break"><tbody>
 {% for k, v in m.source_rows %}<tr><td>{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
 </tbody></table>
-<div class="rp-h3">1.0 規則式初篩門檻之依據</div>
-<table class="no-break"><thead><tr><th class="l">項目</th><th class="l">採用</th><th class="l">出處</th></tr></thead><tbody>
-{% for item, used, ref in m.limit_rows %}<tr><td class="l">{{ item }}</td><td class="l">{{ used }}</td><td class="l">{{ ref }}</td></tr>{% endfor %}
-</tbody></table>
-<div class="rp-note">門檻值由審查者於介面設定；初篩僅就上傳之摘要表逐列比對，作為詰問審查之客觀錨點，不取代逐項檢核。</div>
+<div class="rp-note">本審查不預設審查門檻：各項限值、係數均由 Agent 自行查閱規範原文（附錄 A）後判斷；計算書 PDF 原檔直接提供給模型判讀。</div>
 
 {# ---------------- 2 ---------------- #}
-<div class="rp-h2">2. 規則式初篩結果</div>
-{% if m.prechecks %}
-<table class="rp-dense"><thead><tr><th class="l">項目</th><th class="l">工作表</th><th class="l">說明</th><th>判定</th><th class="l">依據</th></tr></thead><tbody>
-{% for f in m.prechecks %}<tr><td class="l">{{ f.item }}</td><td class="l">{{ f.sheet }}</td><td class="l">{{ f.detail }}</td>
-  <td class="c">{% if f.judge == 'NG' %}<span class="ng">NG</span>{% else %}{{ f.judge }}{% endif %}</td><td class="l">{{ f.reference }}</td></tr>{% endfor %}
+<div class="rp-h2">2. 角色配置與輪替</div>
+<table class="no-break"><thead><tr><th>輪次</th><th>Agent A｜原設計工程師</th><th>Agent B｜外部審查專家</th><th>Agent C｜主任檢核技師</th></tr></thead><tbody>
+{% for r in m.role_rows %}<tr><td class="c">{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td></tr>{% endfor %}
 </tbody></table>
-{% else %}<div class="rp-note">未發現超出門檻之數值。</div>{% endif %}
+<div class="rp-note">每一輪均為全新對話，提示中不含其他輪的內容，同一模型在不同輪次不共用記憶；綜合裁決：{{ m.final_model }}（全新對話）。</div>
 
 {# ---------------- 3 ---------------- #}
-<div class="rp-h2">3. 詰問審查歷程</div>
-<div class="rp-note">Round 1 外審總體意見：{{ m.round1_summary }}</div>
-{% for t in m.threads %}
-{% set i, r, v = t.issue, t.response, t.verdict %}
-<div class="no-break">
-<div class="rp-h3">3.{{ loop.index }} {{ i.issue_id }}　{{ i.title }}（{{ i.category }}）{% if v %}　— 終審：{{ v.decision.value }}／{{ judge[v.risk_level] }}{% endif %}</div>
-<table class="rp-thread"><tbody>
-  <tr><td>R1 外審質疑</td><td>{{ i.challenge }}
-    <div class="rp-eq">{{ i.formula }}</div>
-    <div class="rp-src">引用數據：{{ i.cited_data }}｜依據：{{ i.code_reference }}</div></td></tr>
-  {% if r %}<tr><td>R2 設計回覆<br><span style="font-weight:400">（{{ r.stance.value }}）</span></td><td>{{ r.response }}
-    {% if r.calculation %}<div class="rp-eq">{{ r.calculation }}</div>{% endif %}
-    {% if r.proposed_action %}<div>修正方案：{{ r.proposed_action }}</div>{% endif %}
-    <div class="rp-src">數據出處：{{ r.data_source }}｜規範依據：{{ r.code_reference }}</div></td></tr>{% endif %}
-  {% if v %}<tr><td>R3 外審終審<br><span style="font-weight:400">（{{ v.decision.value }}）</span></td><td>{{ v.rationale }}
-    {% if v.required_action %}<div class="rp-src">應辦事項：{{ v.required_action }}</div>{% endif %}</td></tr>{% endif %}
-</tbody></table>
-</div>
-{% endfor %}
+<div class="rp-h2">3. 綜合審查結論</div>
+<p style="margin:4px 0 8px">{{ m.executive_summary }}</p>
+{% if m.cross_pass_notes %}<div class="rp-note"><b>各輪一致性</b>：{{ m.cross_pass_notes }}</div>{% endif %}
+{% if m.items %}
+<table><thead><tr><th>編號</th><th>項目</th><th>風險等級</th><th>判定</th><th>來源</th><th>綜合結論</th></tr></thead><tbody>
+{% for it in m.items %}<tr><td class="c">{{ it.no }}</td><td>{{ it.title }}</td><td class="c">{{ tags(it.risk) }}</td>
+  <td class="c">{% if it.judge == 'NG' %}<span class="ng">NG</span>{% else %}{{ it.judge }}{% endif %}</td><td>{{ it.sources|join('、') }}</td><td>{{ it.finding }}</td></tr>{% endfor %}
+</tbody></table>{% else %}<div class="rp-note">無疑義項目。</div>{% endif %}
 
 {# ---------------- 4 ---------------- #}
-<div class="rp-h2">4. 主任檢核技師裁決</div>
-<p style="margin:4px 0 8px">{{ m.executive_summary }}</p>
-{% for key, label, items in m.buckets %}
-<div class="rp-h3">4.{{ loop.index }} {{ label }}（{{ items|length }} 項）</div>
-{% if items %}
-<table><thead><tr><th style="width:12mm">編號</th><th class="l" style="width:28mm">項目</th><th class="l">檢核結論</th><th class="l" style="width:36mm">判定依據</th><th class="l" style="width:36mm">處理意見</th></tr></thead><tbody>
-{% for it in items %}<tr><td class="c">{{ it.issue_id }}</td><td class="l">{{ it.title }}</td><td class="l">{{ it.finding }}</td><td class="l">{{ it.basis }}</td><td class="l">{{ it.recommendation }}</td></tr>{% endfor %}
-</tbody></table>
-{% else %}<div class="rp-note">無。</div>{% endif %}
+<div class="rp-h2">4. 解決方案（改動最小且符合規範）</div>
+{% for it in m.items if it.solution or it.required_action %}
+<div class="rp-h3">4.{{ loop.index }} {{ it.title }}　{{ tags(it.risk) }}</div>
+{% if it.clauses %}<div class="rp-src">依據：{{ it.clauses|join('、') }}</div>{% endif %}
+{% if it.solution %}{{ solution(it.solution, True) }}{% endif %}
+{% if it.why_minimal %}<div class="rp-note"><b>為何改動最小</b>：{{ it.why_minimal }}</div>{% endif %}
+{% if it.required_action %}<div class="rp-note"><b>應辦事項</b>：{{ it.required_action }}</div>{% endif %}
+{% else %}<div class="rp-note">無須修正。</div>
 {% endfor %}
-{% if m.observations %}<div class="rp-h3">4.4 審查過程觀察</div><div class="rp-note">{{ m.observations }}</div>{% endif %}
+<div class="rp-h3">rc-member-designer 調整總結</div>
+<div class="rp-note">工具：<a href="{{ m.tool_url }}">{{ m.tool_url }}</a>{% if m.tool_summary %}<br>{{ m.tool_summary }}{% endif %}</div>
+{% if m.adjusted_applied %}<div class="rp-note"><b>已寫入調整後案件檔</b>（{{ m.case_name }} → 下載「調整後案件檔」後於工具中按「開啟案件」載入重算）：
+  {% for x in m.adjusted_applied %}<br>・{{ x }}{% endfor %}</div>{% endif %}
+{% if m.adjusted_rejected %}<div class="rp-note"><b>未能自動套用</b>：{% for x in m.adjusted_rejected %}<br>・{{ x }}{% endfor %}</div>{% endif %}
+
+{# ---------------- 5 ---------------- #}
+<div class="rp-h2">5. 各輪審查歷程</div>
+{% for p in m.passes %}
+{% set pi = loop.index %}
+<div class="rp-h3">5.{{ pi }} 第 {{ p.no }} 輪（本輪結論：{{ p.conclusion }}）</div>
+<div class="rp-note">{% for role, model in p.roles %}{{ role }}＝{{ model }}{% if not loop.last %}；{% endif %}{% endfor %}<br>
+規範查閱：{{ p.lookups|join('；') }}<br>Round 1 外審總體意見：{{ p.round1_summary }}</div>
+{% for t in p.threads %}
+{% set i, r, v, c = t.issue, t.response, t.verdict, t.chief %}
+<div class="rp-h4">{{ i.issue_id }}　{{ i.title }}（{{ i.category }}）{% if v %}　— 終審：{{ v.decision.value }}／{{ v.risk_level.value }}{% endif %}</div>
+<table class="rp-thread"><tbody>
+  <tr><td>R1 外審質疑<br><span style="font-weight:400">初判 {{ i.preliminary_risk.value }}</span></td><td>{{ i.challenge }}
+    {{ i.formulas | tex }}
+    <div class="rp-src">引用數據：{{ i.cited_data }}（{{ i.calc_ref }}）<br>依據：{{ i.code_clauses|join('、') }}——{{ i.code_quote }}</div></td></tr>
+  {% if r %}<tr><td>R2 設計回覆<br><span style="font-weight:400">（{{ r.stance.value }}）</span></td><td>{{ r.response }}
+    {{ r.calculations | tex }}
+    {% if r.proposed_action %}<div>修正方案：{{ r.proposed_action }}</div>{% endif %}
+    <div class="rp-src">數據出處：{{ r.data_source }}｜規範依據：{{ r.code_clauses|join('、') or '—' }}</div></td></tr>{% endif %}
+  {% if v %}<tr><td>R3 外審終審<br><span style="font-weight:400">（{{ v.decision.value }}）</span></td><td>{{ v.rationale }}
+    {{ v.check_formulas | tex }}
+    {% if v.required_action %}<div class="rp-src">應辦事項：{{ v.required_action }}</div>{% endif %}
+    {% for sol in v.solutions %}<div class="rp-src">方案 {{ loop.index }}{% if loop.index == v.recommended_solution %}（外審建議）{% endif %}：{{ sol.label }}｜{{ sol.change_extent }}</div>{% endfor %}</td></tr>{% endif %}
+  {% if c %}<tr><td>主任技師<br><span style="font-weight:400">（{{ c.risk_level.value }}）</span></td><td>{{ c.finding }}
+    {% if c.solution_check %}<div>方案複核：{{ c.solution_check }}</div>{% endif %}
+    {{ c.check_formulas | tex }}
+    {% if t.adopted %}<div class="rp-src">採用：{{ t.adopted.label }}</div>{% endif %}</td></tr>{% endif %}
+</tbody></table>
+{% endfor %}
+<div class="rp-note"><b>主任技師總結</b>：{{ p.executive_summary }}{% if p.observations %}<br>審查過程觀察：{{ p.observations }}{% endif %}</div>
+{% endfor %}
 
 {# ---------------- 彙總 ---------------- #}
 <div class="rp-h2">檢核彙總與總判定</div>
-<table class="no-break"><thead><tr><th class="l">檢核項目</th><th class="l">分類</th><th>外審終審</th><th>風險等級</th><th>判定</th><th class="l">主任技師分類</th><th class="l">依據</th></tr></thead><tbody>
-{% for s in m.summary_rows %}<tr><td class="l">{{ s.issue_id }} {{ s.title }}</td><td class="l">{{ s.category }}</td><td class="c">{{ s.decision }}</td><td class="c">{{ s.risk }}</td>
-  <td class="c">{% if s.judge == 'NG' %}<b>NG</b>{% else %}{{ s.judge }}{% endif %}</td><td class="l">{{ s.bucket }}</td><td class="l">{{ s.ref }}</td></tr>{% endfor %}
+<table class="no-break"><thead><tr><th>編號</th><th>檢核項目</th><th>來源</th><th>風險等級</th><th>判定</th><th>建議方案</th><th>依據</th></tr></thead><tbody>
+{% for s in m.summary_rows %}<tr><td class="c">{{ s.no }}</td><td>{{ s.title }}</td><td>{{ s.sources }}</td><td class="c">{{ s.risk }}</td>
+  <td class="c">{% if s.judge == 'NG' %}<b>NG</b>{% else %}{{ s.judge }}{% endif %}</td><td>{{ s.solution }}</td><td>{{ s.ref }}</td></tr>{% endfor %}
 </tbody></table>
 <div class="verdict {{ m.verdict_level }}">{{ m.verdict_text }}</div>
-{% if m.verdict_items %}<div class="rp-note"><b>{{ '重大疑義' if m.verdict_level == 'bad' else '待複核項目' }}</b>：{% for t in m.verdict_items %}({{ loop.index }}) {{ t }}{% if not loop.last %}；{% endif %}{% endfor %}</div>{% endif %}
-<div class="rp-note">總判定依主任檢核技師分類：有任一重大疑義為「退回補正」，僅有待複核項目為「修正後同意」，其餘為「同意備查」；「未涵蓋」項目須另行檢核，不計入本判定。</div>
+{% if m.verdict_items %}<div class="rp-note"><b>{{ '高風險項目' if m.verdict_level == 'bad' else '中風險項目' }}</b>：{% for t in m.verdict_items %}({{ loop.index }}) {{ t }}{% if not loop.last %}；{% endif %}{% endfor %}</div>{% endif %}
+<div class="rp-note">總判定依綜合裁決：有任一高風險項目為「退回補正」，僅有中風險項目為「修正後同意」，其餘為「同意備查」；且不寬於任一輪之結論。</div>
 
 {# ---------------- 附註 ---------------- #}
 <div class="rp-h2">附註</div>
 <div class="rp-note">1. 本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。<br>
-2. 模型引用之條號與數值應由審查技師對照規範原文確認；初篩條號已依土木401-112 與建築物耐震設計規範及解說（113 年版）原文核對。<br>
-3. 判定用語：OK＝疑義解除；注意＝須補充資料或修正後複核；NG＝不符規範或影響結構安全。
-{% for n in m.notes %}<br>{{ loop.index + 3 }}. 系統紀錄：{{ n }}{% endfor %}</div>
+2. Agent 引用之條文已逐條比對規範原文索引，查無者列於系統紀錄；條文要點與數值仍應由審查技師對照原文確認。<br>
+3. 判定用語：OK＝低風險（疑義解除）；注意＝中風險（須補充資料或修正後複核）；NG＝高風險（不符規範或影響結構安全）。<br>
+4. 建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。
+{% for n in m.notes %}<br>{{ loop.index + 4 }}. 系統紀錄：{{ n }}{% endfor %}</div>
 <div class="rp-note"><b>本報告未涵蓋、須另行檢核</b>：{% for t in m.uncovered %}({{ loop.index }}) {{ t }}{% if not loop.last %}；{% endif %}{% endfor %}。</div>
+
+{# ---------------- 附錄 ---------------- #}
+{% if m.clauses %}
+<div class="rp-h2">附錄 A　引用規範條文（原文節錄）</div>
+{% for c in m.clauses %}<div class="rp-h4">{{ c.ref }}（{{ c.where() }}）</div><div class="rp-clause">{{ c.text[:700] }}{% if c.text|length > 700 %}…{% endif %}</div>{% endfor %}
+{% endif %}
 
 <div class="rp-sign no-break"><table><thead><tr>{% for r in m.sign_roles %}<th>{{ r }}</th>{% endfor %}</tr></thead>
   <tbody><tr class="sg">{% for r in m.sign_roles %}<td></td>{% endfor %}</tr>
-  <tr>{% for r in m.sign_roles %}<td class="l">日期：</td>{% endfor %}</tr></tbody></table></div>
+  <tr>{% for r in m.sign_roles %}<td>日期：</td>{% endfor %}</tr></tbody></table></div>
 </div>
 </body>
 </html>

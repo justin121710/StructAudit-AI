@@ -1,9 +1,10 @@
 """Excel / CSV 結構摘要前處理。
 
-讀入結構分析軟體匯出的摘要表（ETABS / SAP2000 / MIDAS 匯出或自行整理），完成三件事：
-1. 欄位辨識：以中英文別名對應到標準欄位（樓層、位移角、配筋比、應力比…）。
-2. 規則式初篩：依常用規範門檻先標出異常值，作為 Agent 討論的客觀錨點。
-3. 產生給 LLM 的精簡文字摘要（控制長度，避免把整張表塞進 prompt）。
+讀入結構分析軟體匯出的摘要表（ETABS / SAP2000 / MIDAS 匯出或自行整理），完成兩件事：
+1. 欄位辨識：以中英文別名對應到標準欄位（樓層、位移角、配筋比、應力比…），並計算各欄統計值。
+2. 產生給 LLM 的精簡文字摘要（控制長度，避免把整張表塞進 prompt）。
+
+本模組不做任何門檻判定：數值是否符合規範由 Agent 查閱規範原文後自行判斷（見 utils/specs.py）。
 """
 
 from __future__ import annotations
@@ -32,57 +33,7 @@ COLUMN_ALIASES: dict[str, list[str]] = {
     "fy": ["fy", "鋼筋強度"],
 }
 
-# 規則式初篩門檻（預設值；實際案件可在 UI 調整）
-DEFAULT_LIMITS = {
-    # 建築物耐震設計規範及解說 §2.16.1 容許層間相對側向位移角
-    "drift_max": 0.005,
-    # 土木401-112 §18.3.3.1 特殊抗彎矩構架梁 ρ ≤ 0.025
-    "beam_rho_max": 0.025,
-    # 土木401-112 §18.4.4.1 特殊抗彎矩構架柱 0.01Ag ≤ Ast ≤ 0.06Ag（一般柱 §10.6.1.1 為 1%～8%）
-    "col_rho_min": 0.01,
-    "col_rho_max": 0.06,
-    # 強度需求／容量比
-    "dcr_max": 1.0,
-    "dcr_warn": 0.95,
-}
-
-# 初篩項目引用之條號（已對照 rc-member-designer specs/ 規範原文）
-REF = {
-    "drift": "建築物耐震設計規範及解說 §2.16.1",
-    "beam_rho": "土木401-112 §18.3.3.1",
-    "col_rho": "土木401-112 §18.4.4.1（一般柱 §10.6.1.1）",
-    "dcr": "土木401-112 §9.5.1.1、§10.5.1.1（φSn ≥ U）",
-    "combo": "土木401-112 §5.3.1（表 5.3.1）",
-}
-
-# 常見應有的載重組合（土木401-112 §5.3.1 表 5.3.1），以正規式檢查是否遺漏
-EXPECTED_COMBOS = {
-    "1.4D": r"1\.4\s*d(?![a-z])",
-    "1.2D+1.6L": r"1\.2\s*d\s*\+\s*1\.6\s*l",
-    "地震組合 (E)": r"(?<![a-z])(e|eq|ex|ey)(?![a-z])|地震",
-    "風力組合 (W)": r"(?<![a-z])(w|wx|wy)(?![a-z])|風",
-    "0.9D±E 抗傾覆": r"0\.9\s*d",
-}
-
 MAX_ROWS_IN_SUMMARY = 25
-
-
-@dataclass
-class Finding:
-    """規則式初篩結果。"""
-
-    level: str  # "High" / "Medium" / "Info"
-    sheet: str
-    item: str
-    detail: str
-    reference: str
-    check: str = ""  # drift / beam_rho / col_rho / dcr / combo
-    subject: str = ""  # 位置（樓層／構件）或缺少的載重組合名稱
-    value: float | None = None  # 實際值
-    limit: float | None = None  # 超過的限值（柱主筋比為上限或下限中被違反者）
-
-    def as_dict(self) -> dict:
-        return self.__dict__.copy()
 
 
 @dataclass
@@ -99,10 +50,8 @@ class SheetSummary:
 class StructuralSummary:
     source_name: str
     sheets: list[SheetSummary]
-    findings: list[Finding]
     frames: dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
     sha256: str = ""  # 輸入檔雜湊，列於報告表頭供追溯
-    limits: dict = field(default_factory=dict)  # 本次初篩採用之門檻
 
     def to_prompt_text(self, project_info: dict | None = None) -> str:
         """組成給 LLM 的結構數據摘要。"""
@@ -125,12 +74,6 @@ class StructuralSummary:
                 )
             lines.append("")
             lines.append(s.preview_markdown)
-        lines.append("\n## 規則式初篩結果（系統自動計算，供參考）")
-        if self.findings:
-            for f in self.findings:
-                lines.append(f"- [{f.level}] {f.sheet}｜{f.item}：{f.detail}（{f.reference}）")
-        else:
-            lines.append("- 未發現超出預設門檻之數值。")
         return "\n".join(lines)
 
 
@@ -204,87 +147,6 @@ def _drift_to_ratio(series: pd.Series) -> pd.Series:
     return series.map(conv)
 
 
-def _label(row: pd.Series, mapped: dict[str, str]) -> str:
-    parts = [str(row[mapped[k]]) for k in ("story", "member") if k in mapped and pd.notna(row[mapped[k]])]
-    return " ".join(parts) or f"第 {row.name + 1} 列"
-
-
-def _member_kind(row: pd.Series, mapped: dict[str, str], sheet_name: str) -> str:
-    text = " ".join(
-        str(row[mapped[k]]) for k in ("member_type", "member") if k in mapped and pd.notna(row[mapped[k]])
-    ) + " " + sheet_name
-    t = text.lower()
-    if any(k in t for k in ("柱", "column", "col")) or re.search(r"\bc\d", t):
-        return "column"
-    if any(k in t for k in ("梁", "樑", "beam")) or re.search(r"\b[bg]\d", t):
-        return "beam"
-    return "unknown"
-
-
-def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: dict) -> list[Finding]:
-    findings: list[Finding] = []
-
-    if "drift_ratio" in mapped:
-        drift = _drift_to_ratio(df[mapped["drift_ratio"]])
-        for idx, v in drift.items():
-            if pd.notna(v) and v > limits["drift_max"]:
-                label = _label(df.loc[idx], mapped)
-                findings.append(Finding(
-                    "High", name, f"層間位移角 {label}",
-                    f"θ = {v:.4f}，超過上限 {limits['drift_max']}",
-                    REF["drift"], check="drift", subject=label, value=float(v), limit=limits["drift_max"],
-                ))
-
-    if "rebar_ratio" in mapped:
-        rho = _to_ratio(df[mapped["rebar_ratio"]])
-        for idx, v in rho.items():
-            if pd.isna(v):
-                continue
-            kind = _member_kind(df.loc[idx], mapped, name)
-            label = _label(df.loc[idx], mapped)
-            if kind == "beam" and v > limits["beam_rho_max"]:
-                findings.append(Finding(
-                    "High", name, f"梁配筋比 {label}",
-                    f"ρ = {v:.2%}，超過上限 {limits['beam_rho_max']:.1%}", REF["beam_rho"], check="beam_rho",
-                    subject=label, value=float(v), limit=limits["beam_rho_max"],
-                ))
-            elif kind == "column" and not (limits["col_rho_min"] <= v <= limits["col_rho_max"]):
-                findings.append(Finding(
-                    "High", name, f"柱主筋比 {label}",
-                    f"ρg = {v:.2%}，不在 {limits['col_rho_min']:.0%}～{limits['col_rho_max']:.0%} 範圍內",
-                    REF["col_rho"], check="col_rho", subject=label, value=float(v),
-                    limit=limits["col_rho_min"] if v < limits["col_rho_min"] else limits["col_rho_max"],
-                ))
-
-    if "dcr" in mapped:
-        dcr = pd.to_numeric(df[mapped["dcr"]], errors="coerce")
-        for idx, v in dcr.items():
-            if pd.isna(v):
-                continue
-            label = _label(df.loc[idx], mapped)
-            if v > limits["dcr_max"]:
-                findings.append(Finding(
-                    "High", name, f"應力比 {label}", f"D/C = {v:.2f}，超過上限 {limits['dcr_max']}",
-                    REF["dcr"], check="dcr", subject=label, value=float(v), limit=limits["dcr_max"],
-                ))
-            elif v > limits["dcr_warn"]:
-                findings.append(Finding(
-                    "Medium", name, f"應力比 {label}",
-                    f"D/C = {v:.2f}，未超過 {limits['dcr_max']} 但餘裕不足 {limits['dcr_max'] - limits['dcr_warn']:.0%}",
-                    REF["dcr"], check="dcr", subject=label, value=float(v), limit=limits["dcr_max"],
-                ))
-
-    if "load_combo" in mapped:
-        combos = " | ".join(_text(df[mapped["load_combo"]])).lower()
-        for label, pattern in EXPECTED_COMBOS.items():
-            if not re.search(pattern, combos):
-                findings.append(Finding(
-                    "Medium", name, "載重組合", f"未見「{label}」相關組合",
-                    REF["combo"], check="combo", subject=label,
-                ))
-    return findings
-
-
 def _sheet_stats(df: pd.DataFrame, mapped: dict[str, str]) -> dict[str, dict[str, float]]:
     stats = {}
     for key in ("drift_ratio", "rebar_ratio", "dcr", "axial_ratio", "shear_force"):
@@ -327,7 +189,6 @@ def _read_frames(data: bytes, filename: str) -> dict[str, pd.DataFrame]:
 def parse_structural_file(
     file: str | Path | BinaryIO | bytes,
     filename: str | None = None,
-    limits: dict | None = None,
 ) -> StructuralSummary:
     """讀取 Excel／CSV 並產生結構摘要。file 可為路徑、bytes 或檔案物件（Streamlit UploadedFile）。"""
     if isinstance(file, (str, Path)):
@@ -341,9 +202,8 @@ def parse_structural_file(
     if not filename:
         raise ValueError("bytes 輸入需提供 filename 以判斷格式")
 
-    lim = {**DEFAULT_LIMITS, **(limits or {})}
     frames = _read_frames(data, filename)
-    sheets, findings = [], []
+    sheets = []
     for name, df in frames.items():
         if df.empty:
             continue
@@ -357,16 +217,11 @@ def parse_structural_file(
             name=name, n_rows=len(df), columns=list(df.columns), mapped=mapped,
             preview_markdown=preview, stats=_sheet_stats(df, mapped),
         ))
-        findings.extend(run_prechecks(name, df, mapped, lim))
 
     if not sheets:
         raise ValueError("檔案中沒有可讀取的資料")
-    order = {"High": 0, "Medium": 1, "Info": 2}
-    findings.sort(key=lambda f: order.get(f.level, 9))
-    return StructuralSummary(
-        source_name=filename, sheets=sheets, findings=findings, frames=frames,
-        sha256=hashlib.sha256(data).hexdigest(), limits=lim,
-    )
+    return StructuralSummary(source_name=filename, sheets=sheets, frames=frames,
+                             sha256=hashlib.sha256(data).hexdigest())
 
 
 def _has_tabulate() -> bool:

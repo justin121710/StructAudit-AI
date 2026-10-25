@@ -4,6 +4,9 @@ openpyxl>=3.1
 tabulate>=0.9
 pydantic>=2.6
 jinja2>=3.1
+# 計算書 PDF 文字擷取；報告中的 LaTeX 算式排版（mathtext）
+pypdf>=4.0
+matplotlib>=3.8
 # LLM SDK（擇一或皆裝）
 openai>=1.40
 google-genai>=1.0

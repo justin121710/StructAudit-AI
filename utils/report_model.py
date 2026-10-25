@@ -1,8 +1,8 @@
-"""報表資料模型：PDF（HTML 範本／ReportLab）與 Excel 共用同一份內容，確保三種輸出一致。
+"""報表資料模型：PDF（HTML 範本／ReportLab）與 Excel 共用同一份內容，確保輸出一致。
 
 版面依 rc-member-designer 計算書慣例：
 表頭（標題＋兩欄資料表＋程式版本／雜湊）→ 編號章節 → 檢核彙總與總判定 → 附註 → 簽核欄（設計／校核／審核）。
-判定用語亦一致：OK／注意／NG。
+判定用語亦一致：OK／注意／NG；風險等級以中文表示（低風險／中風險／高風險）；算式為 LaTeX。
 """
 
 from __future__ import annotations
@@ -11,52 +11,65 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from agents import schemas as S
-from orchestrator import ReviewSession
+from orchestrator import AGENT_NAMES, PassResult, ReviewSession
+from utils import rcmd
+from utils.specs import Clause, load_library
 from version import __version__
 
 REPORT_TITLE = "結構計算書審查報告"
-CODE_BASIS = "建築物混凝土結構設計規範（土木401-112）＋ 建築物耐震設計規範及解說（113 年版）＋ 建築技術規則建築構造編"
-REVIEW_METHOD = "AI 雙重詰問審查：外審質疑 → 設計回覆 → 外審終審（三回合）＋ 主任檢核技師彙整裁決"
+REVIEW_METHOD = "AI 詰問審查：外審質疑 → 設計回覆 → 外審終審與解決方案（三回合）＋ 主任檢核技師裁決；三個模型輪流擔任角色"
 SIGN_ROLES = ("設計", "校核", "審核")
-
-JUDGE = {S.RiskLevel.PASS: "OK", S.RiskLevel.MEDIUM: "注意", S.RiskLevel.HIGH: "NG"}
-PRECHECK_JUDGE = {"High": "NG", "Medium": "注意", "Info": "參考"}
-LEVEL = {"OK": "ok", "注意": "warn", "NG": "bad", "參考": "info"}
+JUDGE = {S.RiskLevel.LOW: "OK", S.RiskLevel.MEDIUM: "注意", S.RiskLevel.HIGH: "NG"}
+LEVEL = {"OK": "ok", "注意": "warn", "NG": "bad"}
 BUCKET_LABEL = {
-    "major_doubts": "重大疑義",
-    "pending_review_items": "待複核項目",
-    "no_concern_items": "無虞項目",
+    "major_doubts": "重大疑義（高風險）",
+    "pending_review_items": "待複核項目（中風險）",
+    "no_concern_items": "無虞項目（低風險）",
 }
-
-LIMIT_ROWS = [
-    # key, 項目, 採用（格式）, 出處
-    ("drift_max", "層間相對側向位移角", "θ ≤ {v:.4f}", "建築物耐震設計規範及解說 §2.16.1"),
-    ("beam_rho_max", "梁拉力鋼筋比", "ρ ≤ {v:.1%}", "土木401-112 §18.3.3.1"),
-    ("col_rho_min", "柱縱向鋼筋比下限", "ρ_g ≥ {v:.1%}", "土木401-112 §18.4.4.1"),
-    ("col_rho_max", "柱縱向鋼筋比上限", "ρ_g ≤ {v:.1%}", "土木401-112 §18.4.4.1（一般柱 §10.6.1.1 為 8%）"),
-    ("dcr_max", "強度需求／容量比", "D/C ≤ {v:.2f}（超過判 NG）", "土木401-112 §9.5.1.1、§10.5.1.1"),
-    ("dcr_warn", "強度餘裕警示", "D/C > {v:.2f} 判注意", "工程判斷"),
-]
-COMBO_ROW = ("載重組合完整性", "檢查 1.4D、1.2D+1.6L、含 E、含 W、0.9D 是否存在", "土木401-112 §5.3.1（表 5.3.1）")
-
 UNCOVERED = [
-    "結構模型本身（邊界條件、勁度修正、剛性樓板）僅能就上傳之摘要表推論，未讀取分析模型檔",
+    "審查僅依送審計算書（PDF）與所引規範原文，未讀取結構分析模型檔",
     "圖說與計算書之一致性（配筋、斷面、材料標示）",
-    "基礎、擋土與地下室外牆設計",
-    "施工性、鋼筋排列與續接細節",
+    "計算書以外之構件、接頭與基礎",
+    "建議方案之最終數值須於 rc-member-designer 重新計算確認",
 ]
 
 
 @dataclass
 class SummaryRow:
-    issue_id: str
+    no: int
     title: str
-    category: str
-    decision: str  # B 終審：接受／部分接受／駁回
-    risk: str  # Pass／Medium／High
+    sources: str
+    risk: str  # 低風險／中風險／高風險
     judge: str  # OK／注意／NG
-    bucket: str  # 主任技師分類
+    solution: str
     ref: str
+
+
+@dataclass
+class FinalItemView:
+    no: int
+    title: str
+    risk: str
+    judge: str
+    sources: list[str]
+    finding: str
+    clauses: list[str]
+    solution: S.Solution | None
+    why_minimal: str
+    required_action: str
+
+
+@dataclass
+class PassView:
+    no: int
+    roles: list[tuple[str, str]]  # (角色, 模型)
+    conclusion: str
+    round1_summary: str
+    threads: list[dict]
+    buckets: list[tuple[str, str, list[S.ReportItem]]]
+    executive_summary: str
+    observations: str
+    lookups: list[str]
 
 
 @dataclass
@@ -66,19 +79,23 @@ class ReportModel:
     project_name: str
     meta: list[tuple[str, str, bool]]  # (項目, 內容, 是否跨兩欄)
     source_rows: list[tuple[str, str]]
-    limit_rows: list[tuple[str, str, str]]
-    prechecks: list[dict]
-    threads: list[dict]
-    round1_summary: str
-    buckets: list[tuple[str, str, list[S.ReportItem]]]  # (key, 標題, 項目)
+    role_rows: list[list[str]]  # 輪次, A, B, C
+    final_model: str
     executive_summary: str
-    observations: str
+    cross_pass_notes: str
+    items: list[FinalItemView]
+    tool_summary: str
+    case_name: str
+    adjusted_applied: list[str]
+    adjusted_rejected: list[str]
+    passes: list[PassView]
     summary_rows: list[SummaryRow]
     verdict_text: str
-    verdict_level: str  # ok / warn / bad
+    verdict_level: str  # ok／warn／bad
     verdict_items: list[str]
+    clauses: list[Clause]
     notes: list[str]
-    criteria: dict[str, str] = field(default_factory=dict)  # 初篩類別 -> 判定標準文字
+    tool_url: str = rcmd.TOOL_URL
     uncovered: list[str] = field(default_factory=lambda: list(UNCOVERED))
     sign_roles: tuple[str, ...] = SIGN_ROLES
 
@@ -89,103 +106,116 @@ def report_number(session: ReviewSession) -> str:
 
 
 def trace_text(session: ReviewSession) -> str:
-    sha = session.source.get("sha256", "")
-    return f"v{__version__}｜輸入 SHA-256 {sha[:12] or '—'}"
+    sha = session.calc.get("sha256", "")
+    return f"v{__version__}｜計算書 SHA-256 {sha[:16] or '—'}"
 
 
 def model_text(session: ReviewSession) -> str:
-    """三個 Agent 用同一個模型時只寫一次，否則逐一列出。"""
-    models = session.agent_models or {"B": f"{session.provider} / {session.model}"}
-    if len(set(models.values())) == 1:
-        return next(iter(models.values()))
-    roles = {"A": "A 原設計工程師", "B": "B 外部審查專家", "C": "C 主任檢核技師"}
-    return "；".join(f"{roles[k]}：{models[k]}" for k in ("A", "B", "C") if k in models)
+    slots = session.model_slots
+    if len(set(slots)) == 1:
+        return slots[0] if slots else "—"
+    return "；".join(f"模型 {n}：{m}" for n, m in enumerate(slots, 1))
 
 
-def verdict(chief: S.ChiefReport) -> tuple[str, str, list[str]]:
-    c = chief.overall_conclusion
-    if c == S.OverallConclusion.RETURNED:
-        items = [f"{i.issue_id} {i.title}" for i in chief.major_doubts]
-        return f"總判定：{c.value}（NG），重大疑義 {len(items)} 項", "bad", items
-    if c == S.OverallConclusion.CONDITIONAL:
-        items = [f"{i.issue_id} {i.title}" for i in chief.pending_review_items]
-        return f"總判定：{c.value}（注意），待複核 {len(items)} 項", "warn", items
-    return f"總判定：{c.value}（OK）", "ok", []
+def verdict(conclusion: S.OverallConclusion, items: list[FinalItemView]) -> tuple[str, str, list[str]]:
+    if conclusion == S.OverallConclusion.RETURNED:
+        hits = [i.title for i in items if i.risk == S.RiskLevel.HIGH.value]
+        return f"總判定：{conclusion.value}（NG），高風險 {len(hits)} 項", "bad", hits
+    if conclusion == S.OverallConclusion.CONDITIONAL:
+        hits = [i.title for i in items if i.risk == S.RiskLevel.MEDIUM.value]
+        return f"總判定：{conclusion.value}（注意），中風險 {len(hits)} 項", "warn", hits
+    return f"總判定：{conclusion.value}（OK）", "ok", []
+
+
+def _cited_clauses(session: ReviewSession) -> list[Clause]:
+    lib = load_library()
+    texts = []
+    for ps in session.passes:
+        texts += [c for i in ps.round1.issues for c in i.code_clauses]
+        texts += [c for r in ps.round2.responses for c in r.code_clauses]
+    if session.final:
+        texts += [c for it in session.final.items for c in it.code_clauses]
+    seen, out = set(), []
+    for code, cid in lib.find_refs(" ".join(texts)):
+        c = lib.get(code, cid)
+        if c and c.key not in seen:
+            seen.add(c.key)
+            out.append(c)
+    return out
+
+
+def _pass_view(ps: PassResult) -> PassView:
+    return PassView(
+        no=ps.no, roles=[(AGENT_NAMES[r], m) for r, m in ps.roles.items()],
+        conclusion=ps.chief.overall_conclusion.value, round1_summary=ps.round1.summary, threads=ps.threads(),
+        buckets=[(k, v, getattr(ps.chief, k)) for k, v in BUCKET_LABEL.items()],
+        executive_summary=ps.chief.executive_summary, observations=ps.chief.debate_observations, lookups=ps.lookups)
 
 
 def build_model(session: ReviewSession) -> ReportModel:
-    if session.chief is None:
+    if session.final is None:
         raise ValueError("審查尚未完成，無法產生報告")
     info = {k: v for k, v in session.project_info.items() if v}
-    chief = session.chief
+    calc = session.calc
+    project = info.get("工程名稱") or info.get("案名") or ""
+    member = info.get("構件", "")
 
-    meta: list[tuple[str, str, bool]] = [("報告編號", report_number(session), False)]
-    meta += [(k, str(v), False) for k, v in info.items() if k not in ("案名", "備註")]
-    if info.get("備註"):
-        meta.append(("備註", str(info["備註"]), True))
+    meta: list[tuple[str, str, bool]] = [("報告編號", report_number(session), False), ("產生時間", session.started_at, False)]
+    skip = {"工程名稱", "案名", "程式版本／雜湊", "產生時間"}
+    for k, v in info.items():
+        if k not in skip:
+            meta.append((f"計算書{k}" if k in ("單位",) else k, str(v), len(str(v)) > 26))
     meta += [
-        ("審查依據", CODE_BASIS, True),
         ("審查方式", REVIEW_METHOD, True),
-        ("語言模型", model_text(session), len(set(session.agent_models.values())) > 1),
-        ("產生時間", session.started_at, False),
+        ("語言模型", model_text(session), True),
+        ("綜合裁決", session.final_model, False),
+        ("審查輪數", f"{len(session.passes)} 輪（角色輪替）", False),
         ("程式版本／雜湊", trace_text(session), True),
     ]
 
-    src = session.source
-    source_rows = [("輸入檔案", src.get("file", "—"))]
-    for sh in src.get("sheets", []):
-        mapped = "、".join(f"{v}→{k}" for k, v in sh["mapped"].items()) or "未辨識（全表提供參考）"
-        source_rows.append((f"工作表「{sh['name']}」", f"{sh['rows']} 列；{mapped}"))
-    source_rows.append(("SHA-256", src.get("sha256", "—")))
+    source_rows = [
+        ("計算書", f"{calc.get('file', '—')}（{calc.get('pages', 0)} 頁；{calc.get('title') or '—'}）"),
+        ("計算書 SHA-256", calc.get("sha256", "—")),
+    ]
+    if info.get("程式版本／雜湊"):
+        source_rows.append(("計算書程式版本", info["程式版本／雜湊"]))
+    source_rows.append(("rc-member-designer 案件檔", session.case_name or "未提供（解決方案以欄位名稱表示）"))
+    source_rows.append(("規範原文", f"rc-member-designer specs/（{session.spec_source}）"))
 
-    lim = src.get("limits", {})
-    limit_rows = [(item, fmt.format(v=lim[key]), ref) for key, item, fmt, ref in LIMIT_ROWS if key in lim]
-    limit_rows.append(COMBO_ROW)
-    fmt = {key: (fmt.format(v=lim[key]), ref) for key, _, fmt, ref in LIMIT_ROWS if key in lim}
-    criteria = {
-        "drift": fmt.get("drift_max", ("", ""))[0],
-        "beam_rho": fmt.get("beam_rho_max", ("", ""))[0],
-        "col_rho": "、".join(x for x in (fmt.get("col_rho_min", ("",))[0], fmt.get("col_rho_max", ("",))[0]) if x),
-        "dcr": "；".join(x for x in (fmt.get("dcr_max", ("",))[0], fmt.get("dcr_warn", ("",))[0]) if x),
-        "combo": COMBO_ROW[1],
-    }
+    role_rows = [[f"第 {ps.no} 輪", ps.roles.get("A", ""), ps.roles.get("B", ""), ps.roles.get("C", "")]
+                 for ps in session.passes]
 
-    prechecks = [{**f, "judge": PRECHECK_JUDGE.get(f["level"], f["level"])} for f in session.findings]
-
-    bucket_of = {
-        i.issue_id: key for key in BUCKET_LABEL for i in getattr(chief, key)
-    }
-    verdicts = {v.issue_id: v for v in session.round3.verdicts}
-    item_risk = {i.issue_id: i.risk_level for key in BUCKET_LABEL for i in getattr(chief, key)}
-    summary_rows = []
-    for issue in session.round1.issues:
-        risk = item_risk.get(issue.issue_id, verdicts[issue.issue_id].risk_level)
-        summary_rows.append(SummaryRow(
-            issue_id=issue.issue_id, title=issue.title, category=issue.category,
-            decision=verdicts[issue.issue_id].decision.value, risk=risk.value, judge=JUDGE[risk],
-            bucket=BUCKET_LABEL.get(bucket_of.get(issue.issue_id, ""), "—"), ref=issue.code_reference,
-        ))
-
-    text, level, items = verdict(chief)
+    f = session.final
+    items = [FinalItemView(no=n, title=it.title, risk=it.risk_level.value, judge=JUDGE[it.risk_level],
+                           sources=it.source_ids, finding=it.finding, clauses=it.code_clauses,
+                           solution=it.final_solution, why_minimal=it.why_minimal, required_action=it.required_action)
+             for n, it in enumerate(f.items, 1)]
+    summary_rows = [SummaryRow(no=i.no, title=i.title, sources="、".join(i.sources), risk=i.risk, judge=i.judge,
+                               solution=i.solution.label if i.solution else "—", ref="、".join(i.clauses) or "—")
+                    for i in items]
+    text, level, vitems = verdict(f.overall_conclusion, items)
     return ReportModel(
         title=REPORT_TITLE,
         report_no=report_number(session),
-        project_name=info.get("案名", ""),
+        project_name=project or (f"構件 {member}" if member else ""),
         meta=meta,
         source_rows=source_rows,
-        limit_rows=limit_rows,
-        prechecks=prechecks,
-        threads=session.threads(),
-        round1_summary=session.round1.summary,
-        buckets=[(k, v, getattr(chief, k)) for k, v in BUCKET_LABEL.items()],
-        executive_summary=chief.executive_summary,
-        observations=chief.debate_observations,
+        role_rows=role_rows,
+        final_model=session.final_model,
+        executive_summary=f.executive_summary,
+        cross_pass_notes=f.cross_pass_notes,
+        items=items,
+        tool_summary=f.tool_summary,
+        case_name=session.case_name,
+        adjusted_applied=list(session.adjusted_applied),
+        adjusted_rejected=list(session.adjusted_rejected),
+        passes=[_pass_view(ps) for ps in session.passes],
         summary_rows=summary_rows,
         verdict_text=text,
         verdict_level=level,
-        verdict_items=items,
+        verdict_items=vitems,
+        clauses=_cited_clauses(session),
         notes=list(session.notes),
-        criteria=criteria,
     )
 
 

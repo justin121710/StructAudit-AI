@@ -4,116 +4,83 @@ import pytest
 
 streamlit_testing = pytest.importorskip("streamlit.testing.v1")
 APP = Path(__file__).resolve().parent.parent / "app.py"
+KEYS = ("GEMINI_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY")
 
 
-def test_offline_review_flow(monkeypatch):
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"):
+def test_offline_review_flow_moves_output_to_the_right(monkeypatch):
+    for key in KEYS:
         monkeypatch.delenv(key, raising=False)
-    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=300)
     at.run()
     assert not at.exception
-    assert not at.chat_message
+    assert not at.chat_message and not [c for c in at.columns if c.gap == "large"]  # 開始前只有置中的設定區
+    assert {t.label for t in at.text_input} >= {"構件", "斷面", "設計依據"}  # 專案資料取自計算書
+    assert not [x for x in at.number_input]  # 沒有初篩門檻
+    at.radio(key="passes").set_value(2).run()
     at.button(key="run").click().run()
     assert not at.exception
     session = at.session_state["review"]
-    # 每則 Agent 發言都顯示在對話區，且完成後提供 PDF／Excel／JSON 下載
+    assert len(session.passes) == 2 and session.final is not None
+    assert len([c for c in at.columns if c.gap == "large"]) == 2  # 按下開始後左右兩欄
+    assert any("審查過程與結果" in x.value for x in at.markdown)
     assert len(at.chat_message) == len(session.transcript) > 0
-    assert len(at.get("download_button")) == 3
+    assert [t.label for t in at.tabs] == ["第 1 輪", "第 2 輪", "綜合裁決"]
+    labels = [b.label for b in at.get("download_button")]
+    assert labels == ["下載 PDF 報告", "下載 Excel", "下載 JSON", "下載調整後案件檔"]
+    at.run()  # 重新整理（例如按下載）後仍為左右兩欄，綜合裁決排在最前
+    assert not at.exception and [t.label for t in at.tabs][0] == "綜合裁決"
 
 
-def test_pick_three_models_with_api_key(monkeypatch):
+def test_pick_three_models_with_flagship_defaults(monkeypatch):
     import agents.llm_client as llm
 
     secret_key = "sk-test-secret-should-not-leak"
     monkeypatch.setenv("GEMINI_API_KEY", secret_key)
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
     seen = {}
 
     def fake_list(provider, api_key):
         seen["key"] = api_key
-        return ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"]
-
-    shared = llm.MockClient()
-
-    def fake_create(provider, model=None, api_key=None):
-        c = llm.MockClient()  # 共用示範狀態，只換模型名稱
-        c.model, c._severity, c._source = model, shared._severity, shared._source
-        return c
+        return ["gemini-4-argon", "gemini-3-pro", "gemini-3-flash"]
 
     monkeypatch.setattr(llm, "list_models", fake_list)
-    monkeypatch.setattr(llm, "create_client", fake_create)
-    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
+    monkeypatch.setattr(llm, "create_client", lambda provider, model=None, api_key=None: llm.MockClient(model))
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=300)
     at.run()
     assert not at.exception
     assert seen["key"] == secret_key  # 用部署設定的 Key 查詢模型
     assert all(t.value == "" for t in at.text_input if "API Key" in t.label)  # Key 不會送到瀏覽器
     picks = {s.key: s for s in at.selectbox if s.key and s.key.startswith("model_")}
-    assert set(picks) == {"model_A_gemini", "model_B_gemini", "model_C_gemini"}
-    assert not [s for s in at.selectbox if s.key and s.key.startswith("prov_")]  # 只有一家時不顯示服務商選單
-    assert picks["model_B_gemini"].value == "gemini-2.5-pro"  # 預設取偏好清單第一個
-    picks["model_A_gemini"].set_value("gemini-2.5-flash")
-    picks["model_C_gemini"].set_value("gemini-2.0-flash")
+    assert set(picks) == {"model_0_gemini", "model_1_gemini", "model_2_gemini"}
+    assert all(p.value == "gemini-4-argon" for p in picks.values())  # 預設旗艦模型
+    picks["model_1_gemini"].set_value("gemini-3-pro")
     at.run()
+    at.radio(key="passes").set_value(1).run()
     at.button(key="run").click().run()
     assert not at.exception
     s = at.session_state["review"]
-    assert s.agent_models == {"A": "mock / gemini-2.5-flash", "B": "mock / gemini-2.5-pro", "C": "mock / gemini-2.0-flash"}
+    assert s.model_slots == ["mock / gemini-4-argon", "mock / gemini-3-pro", "mock / gemini-4-argon"]
+    assert s.passes[0].roles["B"] == "mock / gemini-3-pro"
 
 
-def test_secret_name_variants_are_recognised(monkeypatch):
-    """Secrets 名稱寫成 OPEN_AI_KEY（含空白）也要讀得到。"""
-    import agents.llm_client as llm
-
-    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
-    seen = {}
-
-    def fake_list(provider, api_key):
-        seen[provider] = api_key
-        return ["gpt-4.1", "gpt-4o"]
-
-    monkeypatch.setattr(llm, "list_models", fake_list)
-    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
-    at.secrets["OPEN_AI_KEY"] = "  sk-openai-test \n"
-    at.run()
-    assert not at.exception
-    assert seen == {"openai": "sk-openai-test"}
-    picks = [s for s in at.selectbox if s.key and s.key.startswith("model_")]
-    assert len(picks) == 3 and picks[0].value == "gpt-4.1"
-
-
-def test_multiple_providers_pick_provider_then_model(monkeypatch):
-    """有兩家以上的 Key 時，先選服務商再選模型；模型清單只列該服務商的模型。"""
+def test_multiple_providers_default_to_flagships(monkeypatch):
+    """三家都有 Key 時，三個槽位預設 Gemini／Claude／OpenAI 的旗艦模型。"""
     import agents.llm_client as llm
 
     monkeypatch.setenv("GEMINI_API_KEY", "g-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "c-key")
+    monkeypatch.setenv("OPEN_AI_KEY", "o-key")  # 名稱寫法不同也能讀到
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    catalog = {"gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
-               "claude": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]}
+    catalog = {"gemini": ["gemini-4-argon", "gemini-3-pro"],
+               "claude": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"],
+               "openai": ["gpt-6.1-sol", "gpt-6.1-mini"]}
     monkeypatch.setattr(llm, "list_models", lambda provider, api_key: catalog[provider])
-    shared = llm.MockClient()
-
-    def fake_create(provider, model=None, api_key=None):
-        c = llm.MockClient()
-        c.model, c._severity, c._source = model, shared._severity, shared._source
-        c.provider = provider
-        return c
-
-    monkeypatch.setattr(llm, "create_client", fake_create)
-    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=300)
     at.run()
     assert not at.exception
-    provs = {s.key: s for s in at.selectbox if s.key and s.key.startswith("prov_")}
-    assert set(provs) == {"prov_A", "prov_B", "prov_C"}
-    provs["prov_C"].set_value("claude")
-    at.run()
-    model_c = next(s for s in at.selectbox if s.key == "model_C_claude")
-    assert model_c.options == catalog["claude"] and model_c.value == "claude-opus-5-5"
-    model_c.set_value("claude-sonnet-5-5")
-    at.run()
-    at.button(key="run").click().run()
-    assert not at.exception
-    s = at.session_state["review"]
-    assert s.agent_models["A"] == "gemini / gemini-2.5-pro"
-    assert s.agent_models["C"] == "claude / claude-sonnet-5-5"
+    provs = {s.key: s.value for s in at.selectbox if s.key and s.key.startswith("prov_")}
+    assert provs == {"prov_0": "gemini", "prov_1": "claude", "prov_2": "openai"}
+    models = {s.key: s.value for s in at.selectbox if s.key and s.key.startswith("model_")}
+    assert models == {"model_0_gemini": "gemini-4-argon", "model_1_claude": "claude-opus-5-5",
+                      "model_2_openai": "gpt-6.1-sol"}

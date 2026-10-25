@@ -44,7 +44,8 @@ Streamlit Community Cloud 是 Streamlit 官方的免費託管服務，直接從 
    ANTHROPIC_API_KEY = "你的 Claude API Key"
    ```
 
-   設定 Secrets 後，介面會用這把 Key 查詢可用模型，使用者直接從下拉選單挑三個 Agent 的模型，不必自己輸入 Key。
+   設定 Secrets 後，介面會用這把 Key 查詢可用模型，使用者直接從下拉選單挑三個模型（預設各家旗艦：Gemini 4 Argon、Claude Opus 5.5、GPT 6.1-sol），不必自己輸入 Key。
+   三家都設定時，三個模型會輪流擔任設計、外審、主任技師；預設 3 輪審查約 25 次模型呼叫、每次都附上計算書 PDF，請留意用量。
    Secrets 中的 Key 只留在伺服器，不會出現在網頁上；使用者也可以在介面輸入自己的 Key 改用自己的額度。
    不填 Secrets 也能部署：介面會預設「離線示範」，或由使用者自行在介面輸入 API Key。
 

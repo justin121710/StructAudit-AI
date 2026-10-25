@@ -17,6 +17,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from orchestrator import ReviewSession
+from utils.latex import split_lines, to_text
 from utils.report_model import JUDGE, ReportModel, build_model
 
 K = {
@@ -45,6 +46,11 @@ def _put(cell, value):
     return cell
 
 
+def tex_text(formulas: list[str]) -> list[str]:
+    """Excel 無法排版 LaTeX，算式轉為可讀純文字。"""
+    return [to_text(x) for f in formulas for x in split_lines(f)]
+
+
 def _disp_width(text: str) -> int:
     return sum(2 if ord(ch) > 0x2E80 else 1 for ch in text)
 
@@ -63,8 +69,8 @@ def _footer(ws):
 # ----------------------------------------------------------------------
 # 檢核表（七欄，與 rc-member-designer 檢核表同欄位結構）
 # ----------------------------------------------------------------------
-CHECK_COLS = [("檢核項目", 32), ("編號", 9), ("判定", 8), ("風險等級", 10),
-              ("內容／算式", 48), ("判定標準／處理意見", 44), ("規範依據（條文出處）", 40)]
+CHECK_COLS = [("檢核項目", 32), ("來源／編號", 14), ("判定", 8), ("風險等級", 10),
+              ("內容／算式", 52), ("建議方案／處理意見", 48), ("規範依據（條文出處）", 36)]
 
 
 def _check_sheet(ws, m: ReportModel):
@@ -96,46 +102,58 @@ def _check_sheet(ws, m: ReportModel):
         c = ws.cell(r, 1, text)
         c.font, c.fill, c.border = Font(name=FONT, size=10, bold=True), _fill(K["sec"]), _box()
 
-    def item(values, judge=""):
+    def item(values, judge="", head=False):
         nonlocal r
         r += 1
         height = 16.0
         for j, v in enumerate(values, 1):
             c = _put(ws.cell(r, j), v)
             ng = j == 3 and judge == "NG"
-            c.font = Font(name=FONT, size=10, bold=ng, color=K["ng"] if ng else None)
+            c.font = Font(name=FONT, size=10, bold=ng or head, color=K["ng"] if ng else None)
             c.border = _box()
-            c.alignment = Alignment(horizontal="center" if j in (2, 3, 4) else "left", vertical="top", wrap_text=True)
+            if head:
+                c.fill = _fill(K["hdr"])
+            c.alignment = Alignment(horizontal="center" if head or j in (2, 3, 4) else "left", vertical="top",
+                                    wrap_text=True)
             height = max(height, _height(v, CHECK_COLS[j - 1][1]))
         ws.row_dimensions[r].height = height
 
-    section("一、規則式初篩")
-    for f in m.prechecks:
-        item([f"{f['item']}（{f['sheet']}）", "—", f["judge"], f["level"], f["detail"],
-              m.criteria.get(f.get("check", ""), "依初篩門檻"), f["reference"]], f["judge"])
-    if not m.prechecks:
-        item(["未發現超出門檻之數值", "—", "OK", "Pass", "", "", ""])
+    section("一、綜合審查項目（各輪合併，風險取最嚴者）")
+    for it in m.items:
+        sol = it.solution
+        plan = (f"{sol.label}：{sol.approach}\n改動幅度：{sol.change_extent}\n驗算：" + "；".join(tex_text(sol.verification))
+                if sol else "—") + (f"\n應辦事項：{it.required_action}" if it.required_action else "")
+        item([it.title, "、".join(it.sources), it.judge, it.risk, it.finding, plan, "、".join(it.clauses) or "—"], it.judge)
+    if not m.items:
+        item(["無疑義項目", "—", "OK", "低風險", "", "", ""])
 
-    section("二、詰問審查項目")
-    advice = {it.issue_id: it.recommendation for _, _, items in m.buckets for it in items}
-    for t in m.threads:
-        i, rsp, v = t["issue"], t["response"], t["verdict"]
-        judge = JUDGE[v.risk_level] if v else "—"
-        content = f"{i.challenge}\n算式：{i.formula}"
-        if rsp:
-            content += f"\n設計回覆（{rsp.stance.value}）：{rsp.response}"
-        crit = (f"終審：{v.decision.value}｜{v.rationale}\n" if v else "") + f"處理意見：{advice.get(i.issue_id, '—')}"
-        item([f"{i.title}（{i.category}）", i.issue_id, judge, v.risk_level.value if v else "—", content, crit,
-              i.code_reference], judge)
+    section("二、rc-member-designer 調整參數（" + m.tool_url + "）")
+    item(["參數", "欄位 id", "", "", "目前值 → 建議值", "所屬項目／方案", "單位"], head=True)
+    for it in m.items:
+        for ch in (it.solution.changes if it.solution else []):
+            item([ch.label, ch.param_id or "—", "", "", f"{ch.current} → {ch.proposed}", f"{it.title}｜{it.solution.label}",
+                  ch.unit or "—"])
+    for x in m.adjusted_applied:
+        item(["已寫入調整後案件檔", "—", "", "", x, m.case_name, ""])
 
-    section("三、檢核彙總")
-    r += 1
-    for j, h in enumerate(["檢核項目", "編號", "判定", "風險等級", "外審終審", "主任技師分類", "依據"], 1):
-        c = ws.cell(r, j, h)
-        c.font, c.fill, c.border = Font(name=FONT, size=10, bold=True), _fill(K["hdr"]), _box()
-        c.alignment = Alignment(horizontal="center")
-    for s in m.summary_rows:
-        item([s.title, s.issue_id, s.judge, s.risk, s.decision, s.bucket, s.ref], s.judge)
+    section("三、各輪審查疑義")
+    for p in m.passes:
+        for t in p.threads:
+            i, v, c = t["issue"], t["verdict"], t["chief"]
+            risk = c.risk_level if c else (v.risk_level if v else None)
+            judge = JUDGE[risk] if risk else "—"
+            content = f"{i.challenge}\n算式：" + "；".join(tex_text(i.formulas))
+            if t["response"]:
+                content += f"\n設計回覆（{t['response'].stance.value}）：{t['response'].response}"
+            crit = (f"終審：{v.decision.value}｜{v.rationale}\n" if v else "") + (
+                f"主任技師：{c.recommendation}" if c else "") + (f"\n採用：{t['adopted'].label}" if t["adopted"] else "")
+            item([f"{i.title}（{i.category}）", f"P{p.no}-{i.issue_id}", judge, risk.value if risk else "—", content, crit,
+                  "、".join(i.code_clauses)], judge)
+
+    section("四、檢核彙總")
+    item(["檢核項目", "來源", "判定", "風險等級", "建議方案", "", "依據"], head=True)
+    for srow in m.summary_rows:
+        item([srow.title, srow.sources, srow.judge, srow.risk, srow.solution, "", srow.ref], srow.judge)
     r += 1
     ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
     ws.merge_cells(start_row=r, start_column=3, end_row=r, end_column=7)
@@ -295,78 +313,90 @@ class _A4:
 
 def _a4_sheet(ws, m: ReportModel):
     a = _A4(ws)
-    a.title(m.title, "AI 雙重詰問審查｜判定：OK／注意／NG")
+    a.title(m.title, "AI 詰問審查（角色輪替）｜判定：OK／注意／NG｜風險等級：低／中／高風險")
     meta = {k: v for k, v, _ in m.meta}
     a.input("工程名稱", m.project_name)
-    for key in ("報告編號", "設計單位", "建築地點", "結構系統", "樓層數", "語言模型", "程式版本／雜湊", "產生時間"):
-        if key in meta:
-            a.input(key, meta[key])
+    for key, value in meta.items():
+        if key not in ("審查方式",):
+            a.input(key, value)
     a.input("審查者／檢核者", "")
 
-    a.chap("一、審查依據")
-    a.para("1.1", "建築物混凝土結構設計規範（土木401-112），內政部；強度、配筋與耐震細則條號依 112 年版。")
-    a.para("1.2", "建築物耐震設計規範及解說（113 年版）；層間相對側向位移角（§2.16.1）、意外扭矩（§2.14）。")
-    a.para("1.3", "建築技術規則建築構造編。")
-    a.para("1.4", meta.get("審查方式", ""))
-
-    a.chap("二、輸入資料與初篩門檻")
+    a.chap("一、審查依據與輸入資料")
     a.table(["項目", "內容", None, None, None], [[k, v, None, None, None] for k, v in m.source_rows], spans=[(1, 4)])
-    a.sub("2.1 規則式初篩門檻之依據")
-    a.table(["項目", "採用", None, "出處", None], [[i, u, None, ref, None] for i, u, ref in m.limit_rows],
-            spans=[(1, 2), (3, 4)])
-    a.sub("2.2 規則式初篩結果")
-    if m.prechecks:
-        a.table(["項目", "說明", "工作表", "判定", "依據"],
-                [[f["item"], f["detail"], f["sheet"], f["judge"], f["reference"]] for f in m.prechecks], judge_col=3)
-    else:
-        a.para("", "未發現超出門檻之數值。")
+    a.para("1.1", "不預設審查門檻：各項限值、係數均由 Agent 自行查閱規範原文（rc-member-designer specs/）後判斷；"
+                  "計算書 PDF 原檔直接提供給模型判讀。")
+    a.para("1.2", meta.get("審查方式", ""))
 
-    a.chap("三、詰問審查歷程")
-    a.para("", f"Round 1 外審總體意見：{m.round1_summary}")
-    for n, t in enumerate(m.threads, 1):
-        i, r, v = t["issue"], t["response"], t["verdict"]
-        a.sub(f"3.{n} {i.issue_id} {i.title}（{i.category}）" + (f"— 終審：{v.decision.value}／{JUDGE[v.risk_level]}" if v else ""))
-        a.para("R1 外審質疑", f"{i.challenge}\n算式：{i.formula}\n引用數據：{i.cited_data}｜依據：{i.code_reference}")
-        if r:
-            text = r.response + (f"\n計算：{r.calculation}" if r.calculation else "")
-            text += f"\n修正方案：{r.proposed_action}" if r.proposed_action else ""
-            text += f"\n數據出處：{r.data_source}｜規範依據：{r.code_reference}"
-            a.para(f"R2 設計回覆\n（{r.stance.value}）", text)
-        if v:
-            a.para(f"R3 外審終審\n（{v.decision.value}）", v.rationale + (f"\n應辦事項：{v.required_action}" if v.required_action else ""))
+    a.chap("二、角色配置與輪替")
+    a.table(["輪次", "A 原設計工程師", "B 外部審查專家", None, "C 主任檢核技師"],
+            [[r[0], r[1], r[2], None, r[3]] for r in m.role_rows], spans=[(2, 3)])
+    a.para("", f"每一輪均為全新對話，同一模型在不同輪次不共用記憶；綜合裁決：{m.final_model}。")
 
-    a.chap("四、主任檢核技師裁決")
-    a.para("4.0", m.executive_summary)
-    for n, (_, label, items) in enumerate(m.buckets, 1):
-        a.sub(f"4.{n} {label}（{len(items)} 項）")
-        if items:
-            a.table(["編號／項目", "檢核結論", "判定依據", None, "處理意見"],
-                    [[f"{it.issue_id} {it.title}", it.finding, it.basis, None, it.recommendation] for it in items],
-                    spans=[(2, 3)])
-        else:
-            a.para("", "無。")
+    a.chap("三、綜合審查結論")
+    a.para("3.0", m.executive_summary)
+    if m.cross_pass_notes:
+        a.para("3.1", f"各輪一致性：{m.cross_pass_notes}")
+    if m.items:
+        a.table(["項目", "來源", "風險等級", "判定", "綜合結論"],
+                [[i.title, "、".join(i.sources), i.risk, i.judge, i.finding] for i in m.items], judge_col=3)
 
-    a.chap("五、檢核彙總")
-    a.table(["檢核項目", "外審終審／主任技師分類", "風險等級", "判定", "依據"],
-            [[f"{s.issue_id} {s.title}", f"{s.decision}／{s.bucket}", s.risk, s.judge, s.ref] for s in m.summary_rows],
-            judge_col=3)
+    a.chap("四、解決方案（改動最小且符合規範）")
+    for n, it in enumerate([i for i in m.items if i.solution or i.required_action], 1):
+        a.sub(f"4.{n} {it.title}（{it.risk}）")
+        sol = it.solution
+        if sol:
+            a.para("建議方案", f"{sol.label}\n做法：{sol.approach}\n改動幅度：{sol.change_extent}")
+            if sol.changes:
+                a.table(["rc-member-designer 欄位", "參數", "目前值", "建議值", "單位"],
+                        [[c.param_id or "—", c.label, c.current, c.proposed, c.unit] for c in sol.changes])
+            a.para("修正後驗算", "\n".join(tex_text(sol.verification)))
+            if sol.tool_steps:
+                a.para("工具操作", sol.tool_steps)
+            if sol.other_method:
+                a.para("其他作法", sol.other_method)
+        if it.why_minimal:
+            a.para("改動最小", it.why_minimal)
+        if it.required_action:
+            a.para("應辦事項", it.required_action)
+    a.sub("rc-member-designer 調整總結")
+    a.para("", f"工具：{m.tool_url}" + (f"\n{m.tool_summary}" if m.tool_summary else ""))
+    if m.adjusted_applied:
+        a.para("案件檔", "已寫入調整後案件檔：\n" + "\n".join(m.adjusted_applied))
+
+    a.chap("五、各輪審查歷程")
+    for p in m.passes:
+        a.sub(f"第 {p.no} 輪（本輪結論：{p.conclusion}）｜" + "；".join(f"{r}＝{mm}" for r, mm in p.roles))
+        a.para("", f"Round 1 外審總體意見：{p.round1_summary}")
+        for t in p.threads:
+            i, r, v, c = t["issue"], t["response"], t["verdict"], t["chief"]
+            a.para(f"{i.issue_id} R1 質疑", f"{i.title}：{i.challenge}\n算式：" + "；".join(tex_text(i.formulas))
+                   + f"\n依據：{'、'.join(i.code_clauses)}")
+            if r:
+                a.para(f"R2 回覆\n（{r.stance.value}）", r.response + (
+                    "\n計算：" + "；".join(tex_text(r.calculations)) if r.calculations else ""))
+            if v:
+                a.para(f"R3 終審\n（{v.decision.value}）", f"{v.risk_level.value}｜{v.rationale}" + "".join(
+                    f"\n方案 {n}：{s.label}｜{s.change_extent}" for n, s in enumerate(v.solutions, 1)))
+            if c:
+                a.para("主任技師", c.finding + (f"\n採用：{t['adopted'].label}" if t["adopted"] else ""))
+        a.para("", f"主任技師總結：{p.executive_summary}")
+
+    a.chap("六、檢核彙總")
+    a.table(["檢核項目", "來源", "風險等級", "判定", "建議方案"],
+            [[s.title, s.sources, s.risk, s.judge, s.solution] for s in m.summary_rows], judge_col=3)
     a.total("整體審查判定", m.verdict_text.replace("總判定：", ""))
-
-    a.chap("六、結論")
-    a.para("6.1", m.executive_summary)
-    if m.verdict_items:
-        label = "重大疑義" if m.verdict_level == "bad" else "待複核項目"
-        a.para("6.2", f"{label}：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.verdict_items, 1)))
-    a.para("6.3", {"bad": "本案有重大疑義，應退回設計單位補正後重新送審。",
-                   "warn": "本案無重大疑義，待複核項目經設計單位修正並送複核後同意。",
-                   "ok": "本案各審查項目疑義均已解除，同意備查。"}[m.verdict_level])
 
     a.chap("七、附註")
     a.para("7.1", "本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。")
-    a.para("7.2", "模型引用之條號與數值應由審查技師對照規範原文確認。")
-    a.para("7.3", "本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。")
-    for k, note in enumerate(m.notes, 4):
+    a.para("7.2", "Agent 引用之條文已逐條比對規範原文索引；條文要點與數值仍應由審查技師對照原文確認。")
+    a.para("7.3", "建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。")
+    a.para("7.4", "本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。")
+    for k, note in enumerate(m.notes, 5):
         a.para(f"7.{k}", f"系統紀錄：{note}")
+    if m.clauses:
+        a.chap("附錄 A　引用規範條文（原文節錄）")
+        for cl in m.clauses:
+            a.para(cl.ref, cl.text[:500] + ("…" if len(cl.text) > 500 else ""))
     a.sign(m.sign_roles)
 
 
