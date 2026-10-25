@@ -18,7 +18,7 @@ from openpyxl.utils import get_column_letter
 
 from orchestrator import ReviewSession
 from utils.latex import split_lines, to_text
-from utils.report_model import JUDGE, ReportModel, build_model
+from utils.report_model import JUDGE, ReportModel, build_model, cost_note, cost_rows
 
 K = {
     "inFill": "DDEBF7", "inBorder": "2E75B6", "inFont": "0000FF",
@@ -331,6 +331,11 @@ def _a4_sheet(ws, m: ReportModel):
     a.table(["輪次", "A 原設計工程師", "B 外部審查專家", None, "C 主任檢核技師"],
             [[r[0], r[1], r[2], None, r[3]] for r in m.role_rows], spans=[(2, 3)])
     a.para("", f"每一輪均為全新對話，同一模型在不同輪次不共用記憶；綜合裁決：{m.final_model}。")
+    if m.cost:
+        a.sub("2.1 審查用量與費用")
+        a.table(["模型", "呼叫次數", "輸入／快取命中 token", "輸出 token", "美元／新台幣"],
+                [[r[0], r[1], f"{r[2]}／{r[3]}" if r[2] else "", r[4], f"{r[5]}／{r[6]}"] for r in cost_rows(m.cost)])
+        a.para("", cost_note(m.cost))
 
     a.chap("三、綜合審查結論")
     a.para("3.0", m.executive_summary)

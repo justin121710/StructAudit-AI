@@ -41,6 +41,7 @@ def test_judgement_and_solutions(session):
     assert m.items[0].solution.changes[0].param_id == "tieSize"
     assert any("tieSize" in x for x in m.adjusted_applied)
     assert any(c.ref == "土木401-112 §18.4.3.2" for c in m.clauses)  # 附錄：引用條文原文
+    assert m.cost.calls == 2 * 7 + 1 and m.cost.estimated  # 用量與費用（離線示範為估算、不計費）
 
 
 def test_xlsx_layout_and_formula_guard(session):
@@ -57,5 +58,6 @@ def test_xlsx_layout_and_formula_guard(session):
     assert any(t.startswith("二、rc-member-designer 調整參數") for t in texts) and "#3 → #4" in texts
     a4 = wb["審查報告(A4)"]
     texts = [c.value for row in a4.iter_rows() for c in row if isinstance(c.value, str)]
+    assert "2.1 審查用量與費用" in texts
     assert "四、解決方案（改動最小且符合規範）" in texts and "六、檢核彙總" in texts and "設計" in texts
     assert any("≥" in t or "≤" in t for t in texts)  # LaTeX 轉為可讀文字

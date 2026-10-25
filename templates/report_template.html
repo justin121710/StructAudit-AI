@@ -116,6 +116,13 @@ a{color:#0F5F6B}
 {% for r in m.role_rows %}<tr><td class="c">{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td><td>{{ r[3] }}</td></tr>{% endfor %}
 </tbody></table>
 <div class="rp-note">每一輪均為全新對話，提示中不含其他輪的內容，同一模型在不同輪次不共用記憶；綜合裁決：{{ m.final_model }}（全新對話）。</div>
+{% if m.cost %}
+<div class="rp-h3">2.1 審查用量與費用</div>
+<table class="rp-dense no-break"><thead><tr><th>模型</th><th>呼叫次數</th><th>輸入 token</th><th>快取命中</th><th>輸出 token</th><th>美元</th><th>新台幣</th></tr></thead><tbody>
+{% for r in cost_rows %}<tr>{% for x in r %}<td class="{{ 'l' if loop.first else 'c' }}">{% if r[0] == '合計' %}<b>{{ x }}</b>{% else %}{{ x }}{% endif %}</td>{% endfor %}</tr>{% endfor %}
+</tbody></table>
+<div class="rp-note">{{ cost_note }}</div>
+{% endif %}
 
 {# ---------------- 3 ---------------- #}
 <div class="rp-h2">3. 綜合審查結論</div>

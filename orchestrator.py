@@ -5,7 +5,8 @@
     Round 2  Agent A 逐項回覆抗辯
     Round 3  Agent B 覆核終審＋具體解決方案（rc-member-designer 參數）
     彙整     Agent C 裁決並複核方案
-每一回合開始前，該 Agent 先自行查閱規範原文（條號或關鍵字），只能引用查得的條文。
+每一回合開始前，該 Agent 先自行查閱規範原文（條號或關鍵字），只能引用查得的條文（固定執行，不可關閉）。
+每一次 API 呼叫的實際 token 用量都記入 ReviewSession.usage，依模型單價換算費用（utils/pricing.py）。
 
 三個模型輪流擔任 A／B／C（第 p 輪：A 用模型 p、B 用模型 p+1、C 用模型 p+2，循環），每一輪都建立全新的 client、
 從頭開始審查，提示中不含其他輪的任何內容，因此同一個模型在不同輪次之間不會共用記憶。
@@ -22,10 +23,11 @@ from typing import Callable
 
 from agents import prompts as P
 from agents import schemas as S
-from agents.llm_client import Attachment, LLMClient, schema_text
+from agents.llm_client import Attachment, LLMClient, Usage, schema_text
 from utils import rcmd
 from utils.calcbook import CalcBook
 from utils.latex import split_lines
+from utils.pricing import USD_TWD, CostSummary, Price, summarize
 from utils.specs import Clause, SpecLibrary, format_clauses, load_library, scope_of
 
 AGENT_NAMES = {
@@ -65,6 +67,7 @@ RISK_MEANING = {
 
 ProgressCallback = Callable[[str, str], None]
 MessageCallback = Callable[["DialogueMessage"], None]
+UsageCallback = Callable[[dict], None]
 ClientFactory = Callable[[], LLMClient]
 
 
@@ -149,6 +152,9 @@ class ReviewSession:
     adjusted_applied: list[str] = field(default_factory=list)
     adjusted_rejected: list[str] = field(default_factory=list)
     spec_source: str = ""
+    usage: list[dict] = field(default_factory=list)  # 每一次 API 呼叫的實際 token 用量（含輪次、角色）
+    prices: dict[str, Price] = field(default_factory=dict)  # 計費單價（模型 → 單價），未列者用預設值
+    fx: float = USD_TWD  # 美元兌新台幣
     started_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
     notes: list[str] = field(default_factory=list)
     transcript: list[DialogueMessage] = field(default_factory=list)
@@ -156,6 +162,10 @@ class ReviewSession:
     @property
     def provider(self) -> str:
         return self.model_slots[0].split(" / ")[0] if self.model_slots else ""
+
+    def cost(self) -> CostSummary:
+        return summarize(self.usage, self.prices, self.fx,
+                         datetime.strptime(self.started_at, "%Y-%m-%d %H:%M").date())
 
     def item_risk(self, source_id: str) -> S.RiskLevel | None:
         """P2-Q1 → 第 2 輪 Q1 在主任技師分類中的風險等級。"""
@@ -165,6 +175,13 @@ class ReviewSession:
         except (ValueError, IndexError):
             return None
         return next((i.risk_level for i in ps.chief_items() if i.issue_id == q), None)
+
+    def _cost_dict(self) -> dict:
+        c = self.cost()
+        return {"usd": round(c.usd, 4), "twd": round(c.twd, 1), "fx": c.fx, "calls": c.calls,
+                "missing_price": c.missing, "estimated": c.estimated,
+                "by_model": [{**r.__dict__, "usd": None if r.usd is None else round(r.usd, 4)} for r in c.rows],
+                "prices": {m: p.__dict__ for m, p in c.prices.items()}}
 
     def to_dict(self) -> dict:
         return {
@@ -178,6 +195,8 @@ class ReviewSession:
             "final_report": self.final.model_dump(mode="json") if self.final else None,
             "rc_member_designer": {"case_file": self.case_name, "applied": self.adjusted_applied,
                                    "rejected": self.adjusted_rejected, "tool": rcmd.TOOL_URL},
+            "usage": self.usage,
+            "cost": self._cost_dict(),
             "transcript": [m.to_dict() for m in self.transcript],
             "notes": self.notes,
         }
@@ -263,7 +282,7 @@ class ReviewOrchestrator:
         on_progress: ProgressCallback | None = None,
         on_message: MessageCallback | None = None,
         library: SpecLibrary | None = None,
-        lookup: bool = True,
+        on_usage: UsageCallback | None = None,
     ):
         """clients：三個模型槽位的 client 產生器（每呼叫一次建立全新的 client）；
         也可給單一產生器或單一 LLMClient（三個槽位共用，測試與離線示範用）。"""
@@ -279,7 +298,7 @@ class ReviewOrchestrator:
         self.on_progress = on_progress or (lambda stage, msg: None)
         self.on_message = on_message or (lambda msg: None)
         self.lib = library or load_library()
-        self.lookup = lookup
+        self.on_usage = on_usage or (lambda record: None)
 
     @staticmethod
     def roles_for(pass_no: int) -> dict[str, int]:
@@ -292,8 +311,21 @@ class ReviewOrchestrator:
         self.on_message(msg)
 
     # ------------------------------------------------------------------
+    def _client(self, s: ReviewSession, slot: int, pass_no: int, role: str) -> LLMClient:
+        """建立全新的 client，並把它每一次 API 呼叫的實際用量記入審查紀錄。"""
+        c = self.slots[slot]()
+
+        def record(u: Usage) -> None:
+            rec = {"pass": pass_no, "role": role, **u.__dict__}
+            s.usage.append(rec)
+            self.on_usage(rec)
+
+        c.on_usage = record
+        return c
+
     def run(self, calc: CalcBook, case: dict | None = None, case_name: str = "",
-            project_info: dict | None = None) -> ReviewSession:
+            project_info: dict | None = None, prices: dict[str, Price] | None = None,
+            fx: float = USD_TWD) -> ReviewSession:
         probe = [f() for f in self.slots]  # 只用來記錄模型名稱；審查時每輪另建新的 client
         session = ReviewSession(
             calc={"file": calc.filename, "sha256": calc.sha256, "kind": calc.kind, "pages": calc.n_pages,
@@ -302,6 +334,8 @@ class ReviewOrchestrator:
             model_slots=[f"{c.provider} / {c.model}" for c in probe],
             case_name=case_name,
             spec_source=self.lib.source,
+            prices=dict(prices or {}),
+            fx=fx,
         )
         self._calc, self._case = calc, case
         self._module = (rcmd.case_module(case) if case else None) or calc.module or "pylon"
@@ -315,7 +349,7 @@ class ReviewOrchestrator:
 
     def _run_pass(self, s: ReviewSession, p: int) -> PassResult:
         idx = self.roles_for(p)
-        clients = {r: self.slots[i]() for r, i in idx.items()}  # 每一輪、每一角色都是全新的 client
+        clients = {r: self._client(s, i, p, r) for r, i in idx.items()}  # 每一輪、每一角色都是全新的 client
         ps = PassResult(no=p, roles={r: f"{c.provider} / {c.model}" for r, c in clients.items()})
         lib = _PassLibrary(self.lib)
         refs = self.lib.find_refs(self._calc.text())[:MAX_AUTO_CLAUSES]
@@ -341,8 +375,6 @@ class ReviewOrchestrator:
         return {"facts": self._calc.facts_text() or "（計算書表頭未辨識）", "calc": self._calc.prompt_text()}
 
     def _lookup(self, s, ps, client, agent, lib: _PassLibrary, stage_key: str, stage: str, extra: str = "") -> None:
-        if not self.lookup:
-            return
         self.on_progress(stage_key, f"第 {ps.no} 輪｜{stage}｜{AGENT_NAMES[agent]} 查閱規範原文中…")
         user = P.LOOKUP_USER.format(stage=stage, catalog=self.lib.catalog(self._scope), toc=self.lib.toc(self._scope),
                                     have=lib.listing(), extra=extra, schema=schema_text(S.LookupRequest),
@@ -530,7 +562,7 @@ class ReviewOrchestrator:
     def final(self, s: ReviewSession) -> None:
         """綜合裁決：第 1 輪主任技師所用之模型，以全新對話彙整各輪結果。"""
         slot = self.roles_for(1)["C"]
-        client = self.slots[slot]()
+        client = self._client(s, slot, 0, "F")
         s.final_model = f"{client.provider} / {client.model}"
         self.on_progress("final", f"綜合裁決｜{AGENT_NAMES['F']} 彙整 {len(s.passes)} 輪結果中…")
         lib = _PassLibrary(self.lib)

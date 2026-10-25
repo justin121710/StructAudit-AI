@@ -13,6 +13,7 @@ from datetime import datetime
 from agents import schemas as S
 from orchestrator import AGENT_NAMES, PassResult, ReviewSession
 from utils import rcmd
+from utils.pricing import CostSummary, twd
 from utils.specs import Clause, load_library
 from version import __version__
 
@@ -95,6 +96,7 @@ class ReportModel:
     verdict_items: list[str]
     clauses: list[Clause]
     notes: list[str]
+    cost: CostSummary | None = None
     tool_url: str = rcmd.TOOL_URL
     uncovered: list[str] = field(default_factory=lambda: list(UNCOVERED))
     sign_roles: tuple[str, ...] = SIGN_ROLES
@@ -216,6 +218,7 @@ def build_model(session: ReviewSession) -> ReportModel:
         verdict_items=vitems,
         clauses=_cited_clauses(session),
         notes=list(session.notes),
+        cost=session.cost(),
     )
 
 
@@ -236,3 +239,25 @@ def meta_rows(meta: list[tuple[str, str, bool]]) -> list[list[tuple[str, str]]]:
     if row:
         rows.append(row)
     return rows
+
+
+def cost_rows(c: CostSummary) -> list[list[str]]:
+    """用量與費用表：模型、呼叫次數、輸入、快取命中、輸出（含思考）、美元、新台幣。"""
+    rows = []
+    for r in c.rows:
+        usd = "未設定單價" if r.usd is None else f"{r.usd:,.3f}"
+        rows.append([r.model, str(r.calls), f"{r.input + r.cache_write:,}", f"{r.cached:,}", f"{r.output:,}", usd,
+                     "—" if r.usd is None else twd(r.usd, c.fx)])
+    rows.append(["合計", str(c.calls), "", "", "", f"{c.usd:,.3f}", twd(c.usd, c.fx)])
+    return rows
+
+
+def cost_note(c: CostSummary) -> str:
+    if c.estimated:
+        return "離線示範不呼叫 API、不計費；token 數依字數估算。"
+    parts = [f"依各服務商回報的實際 token 數 × 單價計算，匯率 {c.fx:g} 新台幣／美元，輸出含思考（推理）token"]
+    parts += [f"{m}：輸入 {p.input:g}、輸出 {p.output:g}、快取讀取 {p.cache_read:g} 美元／百萬 token（{p.source}）"
+              for m, p in c.prices.items() if p.input or p.output]
+    if c.missing:
+        parts.append("未設定單價、未計入：" + "、".join(c.missing))
+    return "；".join(parts) + "。"

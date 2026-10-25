@@ -21,7 +21,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -44,6 +44,20 @@ PREFERRED_MODELS = {
 
 class LLMError(RuntimeError):
     pass
+
+
+@dataclass
+class Usage:
+    """一次 API 呼叫的實際用量（取自服務商回應）。input 為未命中快取的輸入；output 含思考（推理）token。"""
+
+    provider: str
+    model: str  # 實際回應的模型（Claude 拒答備援時可能不同於指定模型）
+    task: str
+    input: int = 0
+    cached: int = 0  # 命中快取的輸入
+    cache_write: int = 0  # 寫入快取的輸入（Claude）
+    output: int = 0
+    estimated: bool = False  # 離線示範：依字數估算
 
 
 @dataclass(frozen=True)
@@ -78,6 +92,12 @@ def extract_json(text: str) -> Any:
         return json.loads(text[start : end + 1])
 
 
+def estimate_tokens(text: str) -> int:
+    """粗估 token 數（中文約 1 字 1 token、其他約 3 字 1 token），僅用於離線示範。"""
+    cjk = len(re.findall(r"[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF\u3000-\u303F]", text))
+    return int(cjk + (len(text) - cjk) / 3)
+
+
 def default_model(provider: str, names: list[str]) -> str | None:
     """依 PREFERRED_MODELS 從模型清單挑預設值；都不符合時回傳 None（由呼叫端取清單第一個）。"""
     for pat in PREFERRED_MODELS.get(provider, []):
@@ -95,6 +115,15 @@ class LLMClient(ABC):
         self.model = model or DEFAULT_MODELS[self.provider]
         self.max_retries = max_retries
         self.attachments_dropped = False  # 模型不接受 PDF 附件、改以擷取文字審查時為 True（記入報告）
+        self.usage: list[Usage] = []  # 每一次 API 呼叫（含格式錯誤重試）的實際用量
+        self.on_usage: Callable[[Usage], None] | None = None
+        self._task = ""
+
+    def _record(self, **kw) -> None:
+        u = Usage(self.provider, kw.pop("model", None) or self.model, self._task, **kw)
+        self.usage.append(u)
+        if self.on_usage:
+            self.on_usage(u)
 
     @abstractmethod
     def _complete(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
@@ -112,6 +141,7 @@ class LLMClient(ABC):
         attachments: list[Attachment] | None = None,
     ) -> T:
         """呼叫模型並以 schema 驗證輸出。task/payload 僅供 mock provider 使用。"""
+        self._task = task
         prompt = user
         last_err: Exception | None = None
         for attempt in range(self.max_retries + 1):
@@ -174,6 +204,11 @@ class OpenAIClient(LLMClient):
         for _ in range(3):
             try:
                 resp = self._client.chat.completions.create(**kwargs())
+                u = getattr(resp, "usage", None)
+                if u:
+                    cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+                    self._record(model=getattr(resp, "model", None), input=(u.prompt_tokens or 0) - cached,
+                                 cached=cached, output=u.completion_tokens or 0)  # completion_tokens 已含推理 token
                 return resp.choices[0].message.content or ""
             except BadRequestError as e:
                 if self._send_temperature and "temperature" in str(e):  # 部分推理模型不接受 temperature
@@ -219,6 +254,16 @@ class ClaudeClient(LLMClient):
                 betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
         else:
             resp = self._client.messages.create(**kwargs)
+        u = getattr(resp, "usage", None)
+        if u:
+            # 拒答備援時，usage.iterations 分列各模型的用量（各依自己的單價計費）；沒有時用總量
+            parts = [x for x in (getattr(u, "iterations", None) or []) if getattr(x, "model", None)] or [u]
+            for x in parts:
+                self._record(model=getattr(x, "model", None) or getattr(resp, "model", None),
+                             input=getattr(x, "input_tokens", 0) or 0,
+                             cached=getattr(x, "cache_read_input_tokens", 0) or 0,
+                             cache_write=getattr(x, "cache_creation_input_tokens", 0) or 0,
+                             output=getattr(x, "output_tokens", 0) or 0)  # output_tokens 已含思考 token
         if resp.stop_reason == "refusal":
             category = getattr(resp.stop_details, "category", None) if resp.stop_details else None
             raise LLMError(f"Claude 拒絕回答此請求（類別：{category or '未提供'}）")
@@ -256,6 +301,11 @@ class GeminiClient(LLMClient):
                 raise
             self.attachments_dropped = True
             resp = self._client.models.generate_content(model=self.model, contents=user, config=config)
+        m = getattr(resp, "usage_metadata", None)
+        if m:
+            cached = getattr(m, "cached_content_token_count", 0) or 0
+            self._record(input=(getattr(m, "prompt_token_count", 0) or 0) - cached, cached=cached,
+                         output=(getattr(m, "candidates_token_count", 0) or 0) + (getattr(m, "thoughts_token_count", 0) or 0))
         return resp.text or ""
 
 
@@ -283,7 +333,10 @@ class MockClient(LLMClient):
         builder = getattr(self, f"_mock_{task}", None)
         if builder is None:
             raise LLMError(f"Mock 不支援 task={task!r}")
-        return schema.model_validate(builder(payload or {}))
+        self._task = task
+        out = schema.model_validate(builder(payload or {}))
+        self._record(input=estimate_tokens(system + user), output=estimate_tokens(out.model_dump_json()), estimated=True)
+        return out
 
     def _mock_lookup(self, p: dict) -> dict:
         if p.get("stage") != "round1":
@@ -603,5 +656,5 @@ def create_client(provider: str, model: str | None = None, api_key: str | None =
     raise LLMError(f"未知的 provider：{provider}")
 
 
-__all__ = ["Attachment", "LLMClient", "LLMError", "create_client", "default_model", "list_models", "schema_text",
+__all__ = ["Attachment", "Usage", "LLMClient", "LLMError", "create_client", "default_model", "list_models", "schema_text",
            "extract_json"]

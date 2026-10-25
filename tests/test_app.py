@@ -15,7 +15,8 @@ def test_offline_review_flow_moves_output_to_the_right(monkeypatch):
     assert not at.exception
     assert not at.chat_message and not [c for c in at.columns if c.gap == "large"]  # 開始前只有置中的設定區
     assert {t.label for t in at.text_input} >= {"構件", "斷面", "設計依據"}  # 專案資料取自計算書
-    assert not [x for x in at.number_input]  # 沒有初篩門檻
+    assert [x.key for x in at.number_input] == ["fx"]  # 沒有初篩門檻，只有計費匯率
+    assert not at.toggle  # 查閱規範固定執行，沒有開關
     at.radio(key="passes").set_value(2).run()
     at.button(key="run").click().run()
     assert not at.exception
@@ -24,6 +25,8 @@ def test_offline_review_flow_moves_output_to_the_right(monkeypatch):
     assert len([c for c in at.columns if c.gap == "large"]) == 2  # 按下開始後左右兩欄
     assert any("審查過程與結果" in x.value for x in at.markdown)
     assert len(at.chat_message) == len(session.transcript) > 0
+    assert len(session.usage) == 2 * 7 + 1  # 每輪 7 次（含 3 次查閱規範）＋綜合裁決
+    assert any("本次審查實際花費：NT$0（離線示範不計費）" in x.value for x in at.markdown)
     assert [t.label for t in at.tabs] == ["第 1 輪", "第 2 輪", "綜合裁決"]
     labels = [b.label for b in at.get("download_button")]
     assert labels == ["下載 PDF 報告", "下載 Excel", "下載 JSON", "下載調整後案件檔"]
@@ -54,6 +57,8 @@ def test_pick_three_models_with_flagship_defaults(monkeypatch):
     picks = {s.key: s for s in at.selectbox if s.key and s.key.startswith("model_")}
     assert set(picks) == {"model_0_gemini", "model_1_gemini", "model_2_gemini"}
     assert all(p.value == "gemini-4-argon" for p in picks.values())  # 預設旗艦模型
+    prices = {x.key: x.value for x in at.number_input}
+    assert prices["price_in_gemini-4-argon"] == 2.0 and prices["price_out_gemini-4-argon"] == 10.0
     picks["model_1_gemini"].set_value("gemini-3-pro")
     at.run()
     at.radio(key="passes").set_value(1).run()
@@ -62,6 +67,8 @@ def test_pick_three_models_with_flagship_defaults(monkeypatch):
     s = at.session_state["review"]
     assert s.model_slots == ["mock / gemini-4-argon", "mock / gemini-3-pro", "mock / gemini-4-argon"]
     assert s.passes[0].roles["B"] == "mock / gemini-3-pro"
+    assert {u["model"] for u in s.usage} == {"gemini-4-argon", "gemini-3-pro"}
+    assert "gemini-3-pro" in s.prices or "gemini-3-pro" in s.cost().missing  # 未收錄單價的模型提示填寫
 
 
 def test_multiple_providers_default_to_flagships(monkeypatch):

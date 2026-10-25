@@ -18,7 +18,7 @@ from markupsafe import Markup
 
 from orchestrator import ReviewSession
 from utils import latex
-from utils.report_model import ReportModel, build_model, meta_rows, report_number
+from utils.report_model import ReportModel, build_model, cost_note, cost_rows, meta_rows, report_number
 from utils.specs import Clause, clause_png
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -66,7 +66,9 @@ def render_html(session: ReviewSession) -> str:
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=select_autoescape(["html"]))
     env.filters["tex"] = tex_html
     images = {k: _img_tag(v) for k, v in clause_images(m.clauses).items()}
-    return env.get_template(TEMPLATE_NAME).render(m=m, meta_rows=meta_rows(m.meta), images=images)
+    return env.get_template(TEMPLATE_NAME).render(m=m, meta_rows=meta_rows(m.meta), images=images,
+                                                  cost_rows=cost_rows(m.cost) if m.cost else [],
+                                                  cost_note=cost_note(m.cost) if m.cost else "")
 
 
 def generate_pdf(session: ReviewSession, engine: str = "auto") -> tuple[bytes, str]:
@@ -217,6 +219,13 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
     story.append(grid([[B(h) for h in ("輪次", "Agent A｜原設計工程師", "Agent B｜外部審查專家", "Agent C｜主任檢核技師")]]
                       + [[P(x) for x in r] for r in m.role_rows], [0.12, 0.29, 0.29, 0.30]))
     story.append(P(f"每一輪均為全新對話，提示中不含其他輪的內容，同一模型在不同輪次不共用記憶；綜合裁決：{m.final_model}（全新對話）。", note))
+
+    if m.cost:
+        story.append(B("2.1 審查用量與費用", h3))
+        story.append(grid([[B(h) for h in ("模型", "呼叫次數", "輸入 token", "快取命中", "輸出 token", "美元", "新台幣")]]
+                          + [[(B if r[0] == "合計" else P)(x) for x in r] for r in cost_rows(m.cost)],
+                          [0.26, 0.1, 0.13, 0.12, 0.13, 0.13, 0.13]))
+        story.append(P(cost_note(m.cost), note))
 
     story += heading2("3. 綜合審查結論")
     story.append(P(m.executive_summary))

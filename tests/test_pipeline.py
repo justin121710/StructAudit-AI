@@ -81,6 +81,11 @@ def test_mock_pipeline_with_role_rotation(session):
         assert [i.title for i in ps.round1.issues][:2] == ["柱端圍束筋間距無法滿足", "強柱弱梁檢核不符"]
         assert ps.clause_keys and "01:18.4.3.2" in ps.clause_keys  # Agent 查閱的規範原文
     assert session.transcript[-1].stage == "final" and session.transcript[-1].pass_no == 0
+    # 每輪 3 次查閱＋Round 1～3＋主任技師，3 輪加綜合裁決共 22 次；每次都記錄用量
+    assert len(session.usage) == 22
+    assert [u["task"] for u in session.usage if u["pass"] == 1] == ["lookup", "round1", "lookup", "round2", "lookup",
+                                                                    "round3", "chief"]
+    assert session.usage[-1]["role"] == "F" and session.to_dict()["cost"]["calls"] == 22
     assert session.final.overall_conclusion == S.OverallConclusion.RETURNED
     assert [i.risk_level for i in session.final.items[:2]] == [S.RiskLevel.HIGH] * 2
     assert session.final.items[0].source_ids == ["P1-Q1", "P2-Q1", "P3-Q1"]
@@ -156,9 +161,10 @@ def test_orchestrator_repairs_inconsistent_outputs(calc):
              "pending_review_items": []}
     final = {"overall_conclusion": "同意備查", "executive_summary": "e",
              "items": [{"title": "合併", "source_ids": ["P1-Q2", "P9-Q1"], "risk_level": "低風險", "finding": "f"}]}
-    client = ScriptedClient([json.dumps(x, ensure_ascii=False)
-                             for x in (r1, r2_partial, r2_retry, r3, r3_retry, chief, final)])
-    s = ReviewOrchestrator(client, passes=1, lookup=False).run(calc)
+    lookup = {"clauses": [{"spec": "01", "clause": "18.4.3"}], "keywords": []}
+    client = ScriptedClient([json.dumps(x, ensure_ascii=False) for x in
+                             (lookup, r1, lookup, r2_partial, r2_retry, lookup, r3, r3_retry, chief, final)])
+    s = ReviewOrchestrator(client, passes=1).run(calc)
     ps = s.passes[0]
     assert ps.issue_ids == ["Q1", "Q2", "Q3"]  # 統一重新編號
     assert ps.round2.responses[2].stance == S.Stance.ADMIT  # 未回覆者補記為未能抗辯
@@ -263,3 +269,53 @@ def test_openai_client_attaches_pdf_and_falls_back_to_text():
     first, second = sent
     assert first["messages"][1]["content"][0]["type"] == "file"
     assert second["messages"][1]["content"] == "user" and c.attachments_dropped
+
+
+def test_usage_is_read_from_each_provider():
+    from agents.llm_client import ClaudeClient, GeminiClient, OpenAIClient
+
+    seen = []
+    c = ClaudeClient("claude-opus-5-5", api_key="k")
+    usage = NS(input_tokens=1000, cache_read_input_tokens=30000, cache_creation_input_tokens=0, output_tokens=5000,
+               iterations=None)
+    c._client = NS(beta=NS(messages=NS(create=lambda **kw: NS(stop_reason="end_turn", stop_details=None, usage=usage,
+                                                              model="claude-opus-5-5",
+                                                              content=[NS(type="text", text="{}")]))))
+    c.on_usage = seen.append
+    c._task = "round1"
+    c._complete("s", "u", 0.3, [])
+    assert (seen[-1].input, seen[-1].cached, seen[-1].output, seen[-1].task) == (1000, 30000, 5000, "round1")
+
+    o = OpenAIClient("gpt-6.1-sol", api_key="k")
+    u = NS(prompt_tokens=40000, completion_tokens=9000, prompt_tokens_details=NS(cached_tokens=10000))
+    o._client = NS(chat=NS(completions=NS(create=lambda **kw: NS(usage=u, model="gpt-6.1-sol",
+                                                                  choices=[NS(message=NS(content="{}"))]))))
+    o._complete("s", "u", 0.3, [])
+    assert (o.usage[-1].input, o.usage[-1].cached, o.usage[-1].output) == (30000, 10000, 9000)
+
+    g = GeminiClient("gemini-4-argon", api_key="k")
+    meta = NS(prompt_token_count=20000, cached_content_token_count=0, candidates_token_count=3000,
+              thoughts_token_count=4000)
+    g._client = NS(models=NS(generate_content=lambda **kw: NS(text="{}", usage_metadata=meta)))
+    g._complete("s", "u", 0.3, [])
+    assert (g.usage[-1].input, g.usage[-1].output) == (20000, 7000)  # 思考 token 計入輸出
+
+
+def test_cost_uses_model_prices_and_fx():
+    from datetime import date
+
+    from utils.pricing import Price, default_price, summarize
+
+    usage = [{"model": "claude-opus-5-5", "input": 1_000_000, "cached": 1_000_000, "cache_write": 0, "output": 100_000},
+             {"model": "gpt-6.1-sol", "input": 500_000, "cached": 0, "cache_write": 0, "output": 50_000},
+             {"model": "mystery-model", "input": 10, "output": 10}]
+    c = summarize(usage, fx=32.5, on=date(2026, 10, 25))
+    by = {r.model: r for r in c.rows}
+    assert by["claude-opus-5-5"].usd == pytest.approx(4 + 0.2 + 2)  # 輸入 4、快取讀取 0.2、輸出 20×0.1
+    assert by["gpt-6.1-sol"].usd == pytest.approx(1 + 0.5)
+    assert by["mystery-model"].usd is None and c.missing == ["mystery-model"]
+    assert c.twd == pytest.approx((6.2 + 1.5) * 32.5)
+    assert default_price("gemini-4-argon", date(2026, 11, 30)).input == 2.0
+    assert default_price("gemini-4-argon", date(2026, 12, 1)).input == 4.0  # 優惠期後標準價
+    custom = summarize(usage[:1], {"claude-opus-5-5": Price(1, 1, 1, 1)}, fx=30)
+    assert custom.usd == pytest.approx(2.1)  # 使用者自訂單價優先

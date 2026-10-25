@@ -17,6 +17,7 @@ from orchestrator import ROLES, DialogueMessage, ReviewOrchestrator, ReviewSessi
 from utils import rcmd
 from utils.calcbook import CalcBook, read_calcbook
 from utils.pdf_generator import generate_pdf
+from utils.pricing import USD_TWD, Price, default_price, summarize, twd
 from utils.report_model import build_model, report_number
 from utils.xlsx_report import generate_xlsx
 
@@ -120,6 +121,26 @@ class DialogueView:
                 st.markdown(f"**{msg.speaker}**{model}　{msg.title}\n\n{msg.body}")
 
 
+def cost_line(c, done: bool = False) -> str:
+    """一行花費摘要（實際 token 數 × 單價）。"""
+    head = "本次審查實際花費" if done else "目前已花費"
+    tokens = f"{c.calls} 次呼叫｜輸入 {sum(r.total_input for r in c.rows):,} token、輸出 {sum(r.output for r in c.rows):,} token"
+    if c.estimated:
+        return f"**{head}：NT$0（離線示範不計費）**　{tokens}（依字數估算）"
+    miss = f"；{'、'.join(c.missing)} 未設定單價，未計入" if c.missing else ""
+    return f"**{head}：{twd(c.usd, c.fx)}**（US${c.usd:,.2f}，匯率 {c.fx:g}）　{tokens}{miss}"
+
+
+def cost_table(c) -> str:
+    rows = ["| 模型 | 呼叫 | 輸入 | 快取命中 | 快取寫入 | 輸出（含思考） | 美元 | 新台幣 |", "|---|---:|---:|---:|---:|---:|---:|---:|"]
+    for r in c.rows:
+        usd = "未設定單價" if r.usd is None else f"{r.usd:,.3f}"
+        ntd = "—" if r.usd is None else twd(r.usd, c.fx)
+        rows.append(f"| {r.model} | {r.calls} | {r.input:,} | {r.cached:,} | {r.cache_write:,} | {r.output:,} | {usd} | {ntd} |")
+    rows.append(f"| **合計** | {c.calls} | | | | | **{c.usd:,.3f}** | **{twd(c.usd, c.fx)}** |")
+    return "\n".join(rows)
+
+
 def _start() -> None:
     st.session_state["started"] = True
     st.session_state["pending"] = True
@@ -191,20 +212,39 @@ with left:
             elif keys and not failed:
                 st.caption("此 API Key 查不到可用的文字模型。")
 
-        c1, c2 = st.columns([1, 1])
-        n_passes = c1.radio("審查輪數", [1, 2, 3], index=2, horizontal=True, key="passes",
+        n_passes = st.radio("審查輪數", [1, 2, 3], index=2, horizontal=True, key="passes",
+                            format_func=lambda n: f"{n} 輪",
                             help="每一輪由三個模型輪流擔任設計、外審、主任技師，各輪為全新對話、互不共用記憶。")
-        lookup = c2.toggle("每回合先查閱規範原文", value=True, key="lookup",
-                           help="Agent 在每一回合前自行決定要查哪些條文；規範原文取自 rc-member-designer 的 specs/。")
         names_for = [m for _, m in slots] if slots else ["示範模型"] * 3
         rows = ["| 輪次 | A 設計 | B 外審 | C 主任技師 |", "|---|---|---|---|"]
         for p in range(1, n_passes + 1):
             idx = ReviewOrchestrator.roles_for(p)
             rows.append(f"| 第 {p} 輪 | " + " | ".join(names_for[idx[r]] for r in ROLES) + " |")
         st.markdown("\n".join(rows))
-        per_pass = 7 if lookup else 4  # 查閱×3（可關閉）＋ Round 1～3 ＋ 主任技師
-        st.caption(f"每輪 {per_pass} 次模型呼叫（{'3 次查閱規範＋' if lookup else ''}Round 1～3＋主任技師），"
-                   f"共約 {n_passes * per_pass + 1} 次（含綜合裁決）；每次都附上計算書 PDF 原檔。")
+        st.caption(f"每輪 7 次模型呼叫（Round 1～3 前各查閱一次規範原文＋Round 1～3＋主任技師；查閱規範固定執行），"
+                   f"共 {n_passes * 7 + 1} 次（含綜合裁決）；每次都附上計算書 PDF 原檔。")
+
+        prices: dict[str, Price] = {}
+        with st.expander("計費單價與匯率（費用依實際 token 數計算）"):
+            fx = st.number_input("匯率（新台幣／美元）", value=USD_TWD, min_value=1.0, step=0.1, format="%.2f", key="fx")
+            for model in dict.fromkeys(m for _, m in slots):
+                base = default_price(model)
+                st.markdown(f"**{model}**（美元／百萬 token）" + (f"　<small>{base.source}</small>" if base else ""),
+                            unsafe_allow_html=True)
+                if base is None:
+                    st.caption("未收錄此模型的單價，請依服務商價目表填寫；未填寫時只顯示 token 數。")
+                c1, c2, c3 = st.columns(3)
+                p_in = c1.number_input("輸入", value=base.input if base else 0.0, min_value=0.0, step=0.1,
+                                       format="%.3f", key=f"price_in_{model}")
+                p_out = c2.number_input("輸出（含思考）", value=base.output if base else 0.0, min_value=0.0, step=0.1,
+                                        format="%.3f", key=f"price_out_{model}")
+                p_cache = c3.number_input("快取讀取", value=base.cache_read if base else 0.0, min_value=0.0,
+                                          step=0.01, format="%.3f", key=f"price_cache_{model}")
+                if base or p_in or p_out:
+                    write = p_in * 1.25 if model.startswith("claude") else 0.0  # Claude 快取寫入為輸入單價 1.25 倍
+                    prices[model] = Price(p_in, p_out, p_cache, write, "使用者設定" if base is None else base.source)
+            if not slots:
+                st.caption("離線示範不呼叫 API、不計費；token 數為依字數估算。")
 
         uploaded = st.file_uploader("結構計算書（PDF，或 Excel／CSV 摘要表）", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
                                     key="calc_file")
@@ -256,6 +296,7 @@ with right:
     summary_box = st.container()
     pending = st.session_state.pop("pending", False)
     if pending and calc is not None:
+        cost_box = st.empty()  # 即時花費：每完成一次 API 呼叫就依實際 token 數更新
         status = st.status("審查進行中…", expanded=False)  # 進度放在對話上方，不會被逐漸變長的對話推到下面
     # 進行中先看第 1 輪的即時對話；完成後綜合裁決排在最前面
     n_tabs = n_passes if pending else len(session.passes) if session else 0
@@ -275,10 +316,17 @@ with right:
                 else:
                     # 每個槽位給「產生器」：每一輪、每個角色都建立全新的 client，不共用記憶
                     factories = [lambda p=p, m=m: create_client(p, model=m, api_key=keys[p]) for p, m in slots]
-                orch = ReviewOrchestrator(factories, passes=n_passes, lookup=lookup,
+                live: list[dict] = []
+
+                def show_cost(rec: dict) -> None:
+                    live.append(rec)
+                    cost_box.markdown(cost_line(summarize(live, prices, fx)))
+
+                orch = ReviewOrchestrator(factories, passes=n_passes,
                                           on_progress=lambda stage, text: status.update(label=text),
-                                          on_message=view.add)
-                session = orch.run(calc, case, case_name, project_info)
+                                          on_message=view.add, on_usage=show_cost)
+                session = orch.run(calc, case, case_name, project_info, prices=prices, fx=fx)
+                cost_box.empty()
                 st.session_state["review"] = session
                 status.update(label="審查完成", state="complete")
             except Exception as e:
@@ -320,3 +368,7 @@ with right:
             e2.link_button("開啟 rc-member-designer", rcmd.TOOL_URL, width="stretch")
             if session.adjusted_applied:
                 st.caption("調整後案件檔已寫入：" + "；".join(session.adjusted_applied))
+            cost = session.cost()
+            st.markdown(cost_line(cost, done=True))
+            with st.expander("各模型用量與費用"):
+                st.markdown(cost_table(cost))
