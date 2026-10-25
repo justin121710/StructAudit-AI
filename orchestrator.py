@@ -35,6 +35,23 @@ BUCKET_RISK = {
     "major_doubts": S.RiskLevel.HIGH,
 }
 
+# 對話中附上白話解釋，讓非結構專業的讀者也看得懂各種立場與判定代表什麼
+STANCE_MEANING = {
+    S.Stance.ADMIT: "設計單位同意審查意見，並提出修正方案",
+    S.Stance.CODE_BASIS: "設計單位認為現行作法符合規範，並指出依據條文",
+    S.Stance.CALC_DEFENSE: "設計單位以計算推導說明設計足夠",
+}
+DECISION_MEANING = {
+    S.Decision.ACCEPT: "回覆合理且有依據，此項疑義解除",
+    S.Decision.PARTIAL: "回覆部分成立，但仍需補充資料或修正",
+    S.Decision.REJECT: "回覆不成立，維持原疑義",
+}
+RISK_MEANING = {
+    S.RiskLevel.PASS: "無安全疑慮",
+    S.RiskLevel.MEDIUM: "需補充資料或修正後再確認",
+    S.RiskLevel.HIGH: "不符規範或影響結構安全，必須修正",
+}
+
 ProgressCallback = Callable[[str, str], None]
 MessageCallback = Callable[["DialogueMessage"], None]
 
@@ -194,10 +211,15 @@ class ReviewOrchestrator:
         for n, issue in enumerate(out.issues, 1):
             issue.issue_id = f"Q{n}"
         s.round1 = out
-        self._say(s, "B", "round1", "初審意見", out.summary)
+        self._say(s, "B", "round1", "初審總體意見",
+                  f"{out.summary}\n\n以下共 {len(out.issues)} 項疑義，請設計單位逐項回覆。")
         for i in out.issues:
-            self._say(s, "B", "round1", f"{i.issue_id} {i.title}（{i.category}）",
-                      f"{i.challenge}\n\n`{i.formula}`\n\n引用數據：{i.cited_data}｜依據：{i.code_reference}")
+            self._say(s, "B", "round1", f"{i.issue_id}　{i.title}", "\n\n".join([
+                f"**疑義說明**：{i.challenge}",
+                f"**檢核算式**：`{i.formula}`",
+                f"**引用數據**：{i.cited_data}",
+                f"**規範依據**：{i.code_reference}",
+            ]))
 
     def round2(self, s: ReviewSession) -> None:
         self.on_progress("round2", f"Round 2｜{AGENT_NAMES['A']} 逐項回覆中…")
@@ -229,11 +251,13 @@ class ReviewOrchestrator:
         s.round2 = out
         titles = {i.issue_id: i.title for i in s.round1.issues}
         for r in out.responses:
-            body = r.response
-            body += f"\n\n`{r.calculation}`" if r.calculation else ""
-            body += f"\n\n修正方案：{r.proposed_action}" if r.proposed_action else ""
-            body += f"\n\n數據出處：{r.data_source}｜規範依據：{r.code_reference}"
-            self._say(s, "A", "round2", f"{r.issue_id} {titles[r.issue_id]}｜{r.stance.value}", body)
+            parts = [f"**立場**：{r.stance.value}（{STANCE_MEANING[r.stance]}）", f"**回覆說明**：{r.response}"]
+            if r.calculation:
+                parts.append(f"**計算推導**：`{r.calculation}`")
+            if r.proposed_action:
+                parts.append(f"**修正方案**：{r.proposed_action}")
+            parts.append(f"**數據出處**：{r.data_source}　**規範依據**：{r.code_reference}")
+            self._say(s, "A", "round2", f"回覆 {r.issue_id}　{titles[r.issue_id]}", "\n\n".join(parts))
 
     def round3(self, s: ReviewSession) -> None:
         self.on_progress("round3", f"Round 3｜{AGENT_NAMES['B']} 覆核終審中…")
@@ -262,8 +286,14 @@ class ReviewOrchestrator:
         s.round3 = out
         titles = {i.issue_id: i.title for i in s.round1.issues}
         for v in out.verdicts:
-            body = v.rationale + (f"\n\n應辦事項：{v.required_action}" if v.required_action else "")
-            self._say(s, "B", "round3", f"{v.issue_id} {titles[v.issue_id]}｜{v.decision.value}（{v.risk_level.value}）", body)
+            parts = [
+                f"**判定**：{v.decision.value}（{DECISION_MEANING[v.decision]}）",
+                f"**風險等級**：{v.risk_level.value}（{RISK_MEANING[v.risk_level]}）",
+                f"**判定理由**：{v.rationale}",
+            ]
+            if v.required_action:
+                parts.append(f"**應辦事項**：{v.required_action}")
+            self._say(s, "B", "round3", f"終審 {v.issue_id}　{titles[v.issue_id]}", "\n\n".join(parts))
 
     def chief(self, s: ReviewSession) -> None:
         self.on_progress("chief", f"彙整｜{AGENT_NAMES['C']} 裁決中…")
@@ -278,12 +308,16 @@ class ReviewOrchestrator:
         report: S.ChiefReport = self._call("C", P.AGENT_C_SYSTEM, user, S.ChiefReport, "chief", payload)
         s.chief = self._normalize_report(report, s)
         c = s.chief
-        lines = [c.executive_summary]
-        for label, items in (("重大疑義", c.major_doubts), ("待複核", c.pending_review_items),
-                             ("無虞", c.no_concern_items)):
+        lines = [f"**總結論**：{c.overall_conclusion.value}", c.executive_summary]
+        for label, meaning, items in (
+            ("重大疑義", "不符規範或影響結構安全，須修正後重新送審", c.major_doubts),
+            ("待複核項目", "需補充資料或修正後再確認", c.pending_review_items),
+            ("無虞項目", "疑義已解除", c.no_concern_items),
+        ):
             if items:
-                lines.append(f"**{label}**：" + "、".join(f"{i.issue_id} {i.title}" for i in items))
-        self._say(s, "C", "chief", f"總結論：{c.overall_conclusion.value}", "\n\n".join(lines))
+                lines.append(f"**{label}**（{meaning}）：\n" + "\n".join(
+                    f"- {i.issue_id}　{i.title}：{i.recommendation}" for i in items))
+        self._say(s, "C", "chief", "最終裁決", "\n\n".join(lines))
 
     # ------------------------------------------------------------------
     def _normalize_report(self, report: S.ChiefReport, s: ReviewSession) -> S.ChiefReport:

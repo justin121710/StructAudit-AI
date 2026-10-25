@@ -23,7 +23,19 @@ from utils.xlsx_report import generate_xlsx
 SAMPLE_FILE = Path(__file__).parent / "examples" / "sample_structure.xlsx"
 PROVIDERS = {"離線示範（不呼叫 API）": "mock", "Google Gemini": "gemini", "OpenAI": "openai"}
 KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
-AVATAR = {"A": "📐", "B": "🔍", "C": "⚖️"}
+# 頭像用 Material 線條圖示（不用 emoji），與 rc-member-designer 的線條圖示風格一致
+AVATAR = {"A": ":material/architecture:", "B": ":material/rate_review:", "C": ":material/gavel:"}
+ROLE_INTRO = {
+    "B": "外部審查專家：負責挑出計算書中不符規範或不夠保守之處",
+    "A": "原設計工程師：負責說明設計依據，必要時承認缺失並提出修正",
+    "C": "主任檢核技師：不參與辯論，綜合整個過程做出最後裁決",
+}
+STAGE_INTRO = {
+    "round1": "外部審查專家閱讀上傳的結構數據與初篩結果，挑出最需要釐清的 3～5 項疑義。",
+    "round2": "原設計工程師逐項回覆：同意並提出修正、引用規範說明作法合規，或以計算證明設計足夠。",
+    "round3": "外部審查專家檢視每一項回覆，判定是否接受，並標示風險等級。",
+    "chief": "主任檢核技師把所有疑義分為重大疑義、待複核與無虞三類，並給出本案的總結論。",
+}
 STAGE_TITLE = {
     "round1": "Round 1｜初審質疑",
     "round2": "Round 2｜回覆抗辯",
@@ -31,7 +43,7 @@ STAGE_TITLE = {
     "chief": "彙整｜主任技師裁決",
 }
 
-st.set_page_config(page_title="結構計算書審查", page_icon="🏗️", layout="centered")
+st.set_page_config(page_title="結構計算書審查", page_icon=":material/fact_check:", layout="centered")
 st.markdown("""<style>
 [class*="st-key-card"]{background:#fff;box-shadow:0 1px 2px rgba(21,28,36,.07)}
 .alert{border-radius:6px;padding:7px 12px;margin:4px 0;font-size:13.5px;border:1px solid}
@@ -41,7 +53,9 @@ st.markdown("""<style>
 .alert small{color:#56636F}
 .verdict{font-size:16px;font-weight:800;padding:8px 12px;border:2px solid #060;display:inline-block;background:#fff;margin:4px 0 8px}
 .verdict.bad{border-color:#c00} .verdict.warn{border-color:#9A5E10}
-.stage{font-size:13px;font-weight:700;color:#0B4D57;border-bottom:1px solid #C3CCD6;padding-bottom:3px;margin:14px 0 6px}
+.stage{font-size:13.5px;font-weight:700;color:#0B4D57;border-bottom:1px solid #C3CCD6;padding-bottom:3px;margin:16px 0 2px}
+.stage-intro{font-size:13px;color:#56636F;margin:0 0 6px}
+.roles{font-size:13px;color:#56636F;line-height:1.7;margin:-4px 0 4px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -50,6 +64,12 @@ def secret(name: str) -> str:
         return st.secrets.get(name, "") or os.getenv(name, "")
     except Exception:  # 沒有 secrets.toml
         return os.getenv(name, "")
+
+
+def dialogue_header() -> None:
+    st.markdown("### 審查對話")
+    st.markdown('<div class="roles">' + "<br>".join(f"Agent {k}｜{v}" for k, v in ROLE_INTRO.items()) + "</div>",
+                unsafe_allow_html=True)
 
 
 class DialogueView:
@@ -62,12 +82,13 @@ class DialogueView:
         with self.box:
             if msg.stage != self.stage:
                 self.stage = msg.stage
-                st.markdown(f'<div class="stage">{STAGE_TITLE[msg.stage]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="stage">{STAGE_TITLE[msg.stage]}</div>'
+                            f'<div class="stage-intro">{STAGE_INTRO[msg.stage]}</div>', unsafe_allow_html=True)
             with st.chat_message(msg.agent, avatar=AVATAR[msg.agent]):
                 st.markdown(f"**{msg.speaker}**　{msg.title}\n\n{msg.body}")
 
 
-st.markdown("## 🏗️ 結構計算書審查")
+st.markdown("## 結構計算書審查")
 st.caption(f"{AGENT_NAMES['B']} 質疑 → {AGENT_NAMES['A']} 回覆 → {AGENT_NAMES['B']} 終審 → {AGENT_NAMES['C']} 裁決")
 
 # ---------------------------------------------------------------- 設定
@@ -130,7 +151,7 @@ if need_key:
 # ---------------------------------------------------------------- 審查對話
 if run and summary is not None:
     st.session_state.pop("review", None)
-    st.markdown("### 審查對話")
+    dialogue_header()
     status = st.status("審查進行中…", expanded=False)  # 進度放在對話上方，不會被逐漸變長的對話推到下面
     view = DialogueView(st.container())
     with status:
@@ -152,7 +173,7 @@ if run and summary is not None:
 else:
     session = st.session_state.get("review")
     if session:
-        st.markdown("### 審查對話")
+        dialogue_header()
         view = DialogueView(st.container())
         for msg in session.transcript:
             view.add(msg)

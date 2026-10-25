@@ -51,7 +51,7 @@ REF = {
     "drift": "建築物耐震設計規範及解說 §2.16.1",
     "beam_rho": "土木401-112 §18.3.3.1",
     "col_rho": "土木401-112 §18.4.4.1（一般柱 §10.6.1.1）",
-    "dcr": "土木401-112 §9.5.1.1、§10.5.1.1（φS_n ≥ U）",
+    "dcr": "土木401-112 §9.5.1.1、§10.5.1.1（φSn ≥ U）",
     "combo": "土木401-112 §5.3.1（表 5.3.1）",
 }
 
@@ -77,6 +77,9 @@ class Finding:
     detail: str
     reference: str
     check: str = ""  # drift / beam_rho / col_rho / dcr / combo
+    subject: str = ""  # 位置（樓層／構件）或缺少的載重組合名稱
+    value: float | None = None  # 實際值
+    limit: float | None = None  # 超過的限值（柱主筋比為上限或下限中被違反者）
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -216,10 +219,11 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
         drift = _drift_to_ratio(df[mapped["drift_ratio"]])
         for idx, v in drift.items():
             if pd.notna(v) and v > limits["drift_max"]:
+                label = _label(df.loc[idx], mapped)
                 findings.append(Finding(
-                    "High", name, f"層間位移角 {_label(df.loc[idx], mapped)}",
-                    f"{v:.4f} > 限值 {limits['drift_max']}",
-                    REF["drift"], check="drift",
+                    "High", name, f"層間位移角 {label}",
+                    f"θ = {v:.4f}，超過上限 {limits['drift_max']}",
+                    REF["drift"], check="drift", subject=label, value=float(v), limit=limits["drift_max"],
                 ))
 
     if "rebar_ratio" in mapped:
@@ -232,13 +236,15 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             if kind == "beam" and v > limits["beam_rho_max"]:
                 findings.append(Finding(
                     "High", name, f"梁配筋比 {label}",
-                    f"ρ = {v:.2%} > {limits['beam_rho_max']:.1%}", REF["beam_rho"], check="beam_rho",
+                    f"ρ = {v:.2%}，超過上限 {limits['beam_rho_max']:.1%}", REF["beam_rho"], check="beam_rho",
+                    subject=label, value=float(v), limit=limits["beam_rho_max"],
                 ))
             elif kind == "column" and not (limits["col_rho_min"] <= v <= limits["col_rho_max"]):
                 findings.append(Finding(
                     "High", name, f"柱主筋比 {label}",
-                    f"ρg = {v:.2%} 不在 {limits['col_rho_min']:.0%}～{limits['col_rho_max']:.0%}",
-                    REF["col_rho"], check="col_rho",
+                    f"ρg = {v:.2%}，不在 {limits['col_rho_min']:.0%}～{limits['col_rho_max']:.0%} 範圍內",
+                    REF["col_rho"], check="col_rho", subject=label, value=float(v),
+                    limit=limits["col_rho_min"] if v < limits["col_rho_min"] else limits["col_rho_max"],
                 ))
 
     if "dcr" in mapped:
@@ -249,13 +255,14 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             label = _label(df.loc[idx], mapped)
             if v > limits["dcr_max"]:
                 findings.append(Finding(
-                    "High", name, f"應力比 {label}", f"D/C = {v:.2f} > {limits['dcr_max']}",
-                    REF["dcr"], check="dcr",
+                    "High", name, f"應力比 {label}", f"D/C = {v:.2f}，超過上限 {limits['dcr_max']}",
+                    REF["dcr"], check="dcr", subject=label, value=float(v), limit=limits["dcr_max"],
                 ))
             elif v > limits["dcr_warn"]:
                 findings.append(Finding(
-                    "Medium", name, f"應力比 {label}", f"D/C = {v:.2f}，餘裕不足 5%",
-                    REF["dcr"], check="dcr",
+                    "Medium", name, f"應力比 {label}",
+                    f"D/C = {v:.2f}，未超過 {limits['dcr_max']} 但餘裕不足 {limits['dcr_max'] - limits['dcr_warn']:.0%}",
+                    REF["dcr"], check="dcr", subject=label, value=float(v), limit=limits["dcr_max"],
                 ))
 
     if "load_combo" in mapped:
@@ -264,7 +271,7 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             if not re.search(pattern, combos):
                 findings.append(Finding(
                     "Medium", name, "載重組合", f"未見「{label}」相關組合",
-                    REF["combo"], check="combo",
+                    REF["combo"], check="combo", subject=label,
                 ))
     return findings
 
