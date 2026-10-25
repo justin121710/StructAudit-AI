@@ -1,0 +1,23 @@
+# 配色沿用 rc-member-designer（案 C「檢核導向」）：冷灰底＋白卡＋深青強調色；語意色 ok/warn/bad 與強調色分開
+[theme]
+base = "light"
+primaryColor = "#0F5F6B"
+backgroundColor = "#EBEEF2"
+secondaryBackgroundColor = "#F5F7F9"
+textColor = "#151C24"
+borderColor = "#D8DEE5"
+linkColor = "#0F5F6B"
+redColor = "#B03A2E"
+orangeColor = "#9A5E10"
+greenColor = "#1E7A44"
+font = "Noto Sans TC:https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap, Microsoft JhengHei, sans-serif"
+baseFontSize = 14
+baseRadius = "6px"
+showWidgetBorder = true
+dataframeHeaderBackgroundColor = "#F5F7F9"
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false

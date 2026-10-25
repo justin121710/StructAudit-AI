@@ -13,7 +13,7 @@
  彙整     Agent C 主任檢核技師   無虞項目／重大疑義／待複核項目 ＋ 總結論
         │
         ▼
- Streamlit 介面 ──► PDF（WeasyPrint，備援 ReportLab）／HTML／JSON 下載
+ Streamlit 介面 ──► PDF（WeasyPrint，備援 ReportLab）／Excel／HTML／JSON 下載
 ```
 
 ## 快速開始
@@ -23,14 +23,31 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-左側選擇 LLM 服務並輸入 API Key；沒有 Key 時可選「離線示範」走完整流程與報告版面。
-API Key 也可用環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`，或 `.streamlit/secrets.toml`（參考 `secrets.toml.example`）。
+沒有設定 API Key 時預設「離線示範」，可直接走完整流程並產出報表。
+API Key 可在介面輸入，或用環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`、`.streamlit/secrets.toml`（參考 `secrets.toml.example`）。
 模型名稱可在介面修改，或以 `GEMINI_MODEL`／`OPENAI_MODEL` 設定預設值；`OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
+
+## 與 rc-member-designer 一致的報表與介面
+
+報表與介面沿用 [rc-member-designer](https://github.com/justin121710/rc-member-designer)（RC 構件設計工具）的格式，
+兩套工具產出的計算書／審查報告可以並排送審。
+
+| 項目 | 對齊內容 |
+|---|---|
+| A4 報告（PDF／HTML） | 標題列（左標題、右案名）＋兩欄式表頭、「程式版本／雜湊」（版本＋輸入檔 SHA-256）、粗底線編號章節、灰底鍵值表、「1.0 …之依據」表、「檢核彙總與總判定」表＋總判定框、附註與「未涵蓋、須另行檢核」、簽核欄（審查／校核／審核）、頁尾「第 n 頁／共 N 頁」 |
+| 判定用語 | OK／注意／NG（對應風險等級 Pass／Medium／High） |
+| Excel 報表 | 「檢核表」（七欄、凍結表頭、A3 橫向）＋「審查報告(A4)」（一、二、三…章節、A4 直向）；v2 色碼：表頭 `D9E1F2`、分節 `F2F2F2`、整體判定淺琥珀 `FFF2CC`、輸入資料淺藍底藍框藍字；Arial；頁尾日期與頁碼 |
+| 介面 | 冷灰底白卡、深青強調色 `#0F5F6B`、語意色 ok／warn／bad 與強調色分開；頂列（品名＋設定摘要＋審查戳記）、狀態列判定膠囊、左輸入欄＋右分頁工作區、A4 報告預覽 |
+| 規範條號 | 初篩引用之條號已對照 rc-member-designer `specs/` 內的規範原文（土木401-112、建築物耐震設計規範及解說 113 年版） |
+
+PDF、HTML、Excel 共用 `utils/report_model.py` 的同一份報表資料，內容一致。
 
 ## 專案結構
 
 ```
 app.py                     Streamlit 介面
+version.py                 程式版本（列於報告表頭）
+.streamlit/config.toml     介面主題色
 orchestrator.py            三回合辯論排程與一致性檢查
 agents/
   prompts.py               A／B／C 的 System Prompt 與各回合 User Prompt
@@ -38,7 +55,9 @@ agents/
   llm_client.py            OpenAI／Gemini／離線 Mock 封裝、JSON 驗證與重試
 utils/
   parser.py                Excel／CSV 前處理、欄位辨識、規則式初篩
-  pdf_generator.py         HTML 範本 → PDF
+  report_model.py          報表資料模型（PDF／HTML／Excel 共用）
+  pdf_generator.py         HTML 範本 → PDF（WeasyPrint，備援 ReportLab）
+  xlsx_report.py           Excel 審查報表（檢核表＋審查報告(A4)）
 templates/report_template.html
 examples/                  示範資料與產生腳本
 tests/                     pytest
@@ -63,11 +82,11 @@ tests/                     pytest
 
 | 項目 | 門檻 | 參考 |
 |---|---|---|
-| 層間位移角 | ≤ 0.005 | 建築物耐震設計規範 3.13 |
-| 梁拉力筋比 | ≤ 2.5% | 土木401 15.3.2 |
-| 柱主筋比 | 1%～6% | 土木401 10.9.1／15.4.3 |
-| 應力比 D/C | > 1.0 為 High，> 0.95 為 Medium | 土木401 9.1 |
-| 載重組合 | 檢查 1.4D、1.2D+1.6L、E、W、0.9D 是否存在 | 耐震規範 2.17／土木401 9.2 |
+| 層間位移角 | ≤ 0.005 | 建築物耐震設計規範及解說 §2.16.1 |
+| 梁拉力鋼筋比 | ≤ 2.5% | 土木401-112 §18.3.3.1 |
+| 柱主筋比 | 1%～6% | 土木401-112 §18.4.4.1（一般柱 §10.6.1.1 為 1%～8%） |
+| 應力比 D/C | > 1.0 為 NG，> 0.95 為注意 | 土木401-112 §9.5.1.1、§10.5.1.1 |
+| 載重組合 | 檢查 1.4D、1.2D+1.6L、E、W、0.9D 是否存在 | 土木401-112 §5.3.1（表 5.3.1） |
 
 初篩結果會一併提供給三個 Agent，作為辯論的客觀錨點，降低模型憑空推論。
 
@@ -79,9 +98,10 @@ tests/                     pytest
   C 的分類不重不漏（重複者取較嚴重分類、遺漏者依 B 終審風險補入），總結論依分類結果校正。
   所有修正都記錄在報告「系統紀錄」中。
 - **分角色模型**：`ReviewOrchestrator({"A": client_a, "B": client_b, "C": client_c})` 可讓三個角色使用不同模型（例如 C 用較強的模型）。
-- **PDF**：WeasyPrint 依 `templates/report_template.html` 排版（頁首頁尾、頁碼、簽章欄）；
-  若系統缺少 Pango，自動改用 ReportLab 產生簡化版（會自動尋找系統中文字型嵌入）。
-  WeasyPrint 需要中文字型，Linux 可安裝 `fonts-noto-cjk`。
+- **PDF**：WeasyPrint 依 `templates/report_template.html` 排版；若系統缺少 Pango，自動改用 ReportLab
+  依同一份報表資料產生相同章節的 PDF（會自動尋找系統中文字型嵌入）。WeasyPrint 需要中文字型，Linux 可安裝 `fonts-noto-cjk`。
+- **Excel**：模型輸出以「=」開頭時一律存成文字，不會被 Excel 當成公式執行。
+- **報告預覽**：以 `data:` URL 載入 iframe，與介面不同源；模型輸出在範本中已跳脫。
 
 ## 測試
 

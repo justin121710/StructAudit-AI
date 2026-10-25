@@ -1,40 +1,30 @@
 """A4 審查報告產生器。
 
-優先以 Jinja2 HTML 範本 + WeasyPrint 排版（版面最完整）；
-若環境缺少 WeasyPrint 所需的 Pango 等系統函式庫，則改用 ReportLab 產生簡化版 PDF
-（使用內建 CID 字型 MSung-Light，不需額外安裝中文字型）。
+版面沿用 rc-member-designer 計算書（見 utils/report_model.py）。
+優先以 Jinja2 HTML 範本 + WeasyPrint 排版；若環境缺少 WeasyPrint 所需的 Pango 等系統函式庫，
+改用 ReportLab 依同一份報表資料模型產生相同章節結構的 PDF。
 """
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from orchestrator import ReviewSession
+from utils.report_model import JUDGE, ReportModel, build_model, meta_rows, report_number
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 TEMPLATE_NAME = "report_template.html"
 
-
-def report_number(session: ReviewSession) -> str:
-    stamp = datetime.strptime(session.started_at, "%Y-%m-%d %H:%M").strftime("%Y%m%d-%H%M")
-    return f"SR-{stamp}"
+__all__ = ["render_html", "generate_pdf", "report_number"]
 
 
 def render_html(session: ReviewSession) -> str:
-    if session.chief is None:
-        raise ValueError("審查尚未完成，無法產生報告")
+    m = build_model(session)
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=select_autoescape(["html"]))
-    return env.get_template(TEMPLATE_NAME).render(
-        session=session,
-        chief=session.chief,
-        threads=session.threads(),
-        info=session.project_info,
-        report_no=report_number(session),
-    )
+    return env.get_template(TEMPLATE_NAME).render(m=m, meta_rows=meta_rows(m.meta), judge=JUDGE)
 
 
 def generate_pdf(session: ReviewSession, engine: str = "auto") -> tuple[bytes, str]:
@@ -48,7 +38,7 @@ def generate_pdf(session: ReviewSession, engine: str = "auto") -> tuple[bytes, s
         except (ImportError, OSError) as e:
             if engine == "weasyprint":
                 raise RuntimeError(f"WeasyPrint 無法使用：{e}") from e
-    return _reportlab_pdf(session), "reportlab"
+    return _reportlab_pdf(build_model(session)), "reportlab"
 
 
 # ----------------------------------------------------------------------
@@ -81,126 +71,170 @@ def _register_cjk_font(pdfmetrics, UnicodeCIDFont) -> str:
     return "MSung-Light"
 
 
-def _reportlab_pdf(session: ReviewSession) -> bytes:
+def _reportlab_pdf(m: ReportModel) -> bytes:
     import io
 
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    from reportlab.platypus import (
+        HRFlowable, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle,
+    )
 
     font = _register_cjk_font(pdfmetrics, UnicodeCIDFont)
     base = ParagraphStyle("base", fontName=font, fontSize=9, leading=13, wordWrap="CJK")
-    small = ParagraphStyle("small", parent=base, fontSize=8, leading=11, textColor=colors.grey)
-    h1 = ParagraphStyle("h1", parent=base, fontSize=18, leading=24, alignment=TA_CENTER, spaceAfter=8)
-    h2 = ParagraphStyle("h2", parent=base, fontSize=12, leading=18, spaceBefore=10, spaceAfter=4,
-                        textColor=colors.HexColor("#1f3a5f"))
-    risk_color = {"High": "#b91c1c", "Medium": "#b45309", "Pass": "#15803d", "Info": "#6b7280"}
+    note = ParagraphStyle("note", parent=base, fontSize=8, leading=12, textColor=colors.HexColor("#444444"),
+                          leftIndent=10)
+    eq = ParagraphStyle("eq", parent=base, leftIndent=10, textColor=colors.HexColor("#222222"))
+    h1 = ParagraphStyle("h1", parent=base, fontSize=14, leading=20)
+    h2 = ParagraphStyle("h2", parent=base, fontSize=10.5, leading=15, spaceBefore=10)
+    h3 = ParagraphStyle("h3", parent=base, fontSize=9.5, leading=14, spaceBefore=6, spaceAfter=3)
+    width = A4[0] - 24 * mm
+    grid_c, head_c, kv_c = colors.HexColor("#999999"), colors.HexColor("#eeeeee"), colors.HexColor("#f2f2f2")
 
-    P = lambda t, st=base: Paragraph(escape(str(t or "")).replace("\n", "<br/>"), st)  # noqa: E731
+    def P(t, st=base):
+        return Paragraph(escape(str(t or "")).replace("\n", "<br/>"), st)
 
-    def tag(level: str) -> Paragraph:
-        return Paragraph(f'<font color="{risk_color.get(level, "#000")}"><b>{level}</b></font>', base)
+    def B(t, st=base):
+        return Paragraph("<b>" + escape(str(t or "")).replace("\n", "<br/>") + "</b>", st)
 
-    def grid(rows, widths):
-        t = Table(rows, colWidths=widths, repeatRows=1)
-        t.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#d1d5db")),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ]))
+    def judge(t):
+        return B(t) if t == "NG" else P(t)
+
+    def heading2(t):
+        return [B(t, h2), HRFlowable(width="100%", thickness=1.4, color=colors.HexColor("#333333"),
+                                     spaceBefore=1, spaceAfter=5)]
+
+    def grid(rows, widths, kv=False):
+        t = Table(rows, colWidths=[w * width for w in widths], repeatRows=0 if kv else 1)
+        style = [("GRID", (0, 0), (-1, -1), 0.5, grid_c), ("VALIGN", (0, 0), (-1, -1), "TOP")]
+        style.append(("BACKGROUND", (0, 0), (0, -1), kv_c) if kv else ("BACKGROUND", (0, 0), (-1, 0), head_c))
+        t.setStyle(TableStyle(style))
         return t
 
-    chief = session.chief
-    story = [P("結構計算書審查報告", h1)]
-    info_rows = [[P("報告編號"), P(report_number(session))]]
-    info_rows += [[P(k), P(v)] for k, v in session.project_info.items() if v]
-    info_rows += [[P("審查日期"), P(session.started_at)],
-                  [P("語言模型"), P(f"{session.provider} / {session.model}")]]
-    story.append(grid(info_rows, [30 * mm, 144 * mm]))
+    story = []
+    # 表頭：左標題、右案名，下方兩欄式資料表
+    title = Table([[B(m.title, h1), P(f"案名：{m.project_name}" if m.project_name else "")]],
+                  colWidths=[0.6 * width, 0.4 * width])
+    title.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, 0), 1.4, colors.HexColor("#333333")),
+                               ("ALIGN", (1, 0), (1, 0), "RIGHT"), ("VALIGN", (0, 0), (-1, -1), "BOTTOM")]))
+    story.append(title)
+    meta, spans = [], []
+    for n, row in enumerate(meta_rows(m.meta)):
+        if len(row) == 1:
+            meta.append([B(row[0][0]), P(row[0][1]), "", ""])
+            spans.append(("SPAN", (1, n), (3, n)))
+        else:
+            cells = [x for k, v in row for x in (B(k), P(v))]
+            meta.append(cells + [""] * (4 - len(cells)))
+    mt = Table(meta, colWidths=[w * width for w in (0.16, 0.34, 0.16, 0.34)])
+    mt.setStyle(TableStyle([("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor("#dddddd")),
+                            ("VALIGN", (0, 0), (-1, -1), "TOP"), *spans]))
+    story += [mt, Spacer(1, 6)]
 
-    story.append(P("一、審查結論", h2))
-    color = {"退回補正": "High", "修正後同意": "Medium", "同意備查": "Pass"}[chief.overall_conclusion.value]
-    story.append(Paragraph(
-        f'<font color="{risk_color[color]}"><b>{chief.overall_conclusion.value}</b></font>',
-        ParagraphStyle("verdict", parent=base, fontSize=15, leading=22)))
-    story.append(Spacer(1, 4))
-    story.append(P(chief.executive_summary))
+    # 1
+    story += heading2("1. 審查依據與輸入資料")
+    story.append(grid([[B(k), P(v)] for k, v in m.source_rows], [0.22, 0.78], kv=True))
+    story.append(B("1.0 規則式初篩門檻之依據", h3))
+    story.append(grid([[B("項目"), B("採用"), B("出處")]] + [[P(a), P(b), P(c)] for a, b, c in m.limit_rows],
+                      [0.28, 0.36, 0.36]))
+    story.append(P("門檻值由審查者於介面設定；初篩僅就上傳之摘要表逐列比對，作為詰問審查之客觀錨點，不取代逐項檢核。", note))
 
-    head = [P(h) for h in ("編號", "項目", "檢核結論", "判定依據", "處理意見")]
-    widths = [16 * mm, 28 * mm, 60 * mm, 35 * mm, 35 * mm]
-    for title, items in (("（一）重大疑義", chief.major_doubts),
-                         ("（二）待複核項目", chief.pending_review_items),
-                         ("（三）無虞項目", chief.no_concern_items)):
-        story.append(P(title, ParagraphStyle("h3", parent=base, fontSize=10.5, spaceBefore=6, spaceAfter=3)))
-        if not items:
-            story.append(P("無。", small))
-            continue
-        rows = [head] + [[P(i.issue_id), P(i.title), P(i.finding), P(i.basis), P(i.recommendation)]
-                         for i in items]
-        story.append(grid(rows, widths))
-    if chief.debate_observations:
-        story += [P("（四）主任檢核技師觀察", h2), P(chief.debate_observations)]
-
-    story.append(P("二、規則式初篩結果", h2))
-    if session.findings:
-        rows = [[P(h) for h in ("等級", "工作表", "項目", "說明", "參考規範")]]
-        rows += [[tag(f["level"]), P(f["sheet"]), P(f["item"]), P(f["detail"]), P(f["reference"])]
-                 for f in session.findings]
-        story.append(grid(rows, [16 * mm, 26 * mm, 40 * mm, 50 * mm, 42 * mm]))
+    # 2
+    story += heading2("2. 規則式初篩結果")
+    if m.prechecks:
+        rows = [[B(h) for h in ("項目", "工作表", "說明", "判定", "依據")]]
+        rows += [[P(f["item"]), P(f["sheet"]), P(f["detail"]), judge(f["judge"]), P(f["reference"])] for f in m.prechecks]
+        story.append(grid(rows, [0.2, 0.13, 0.27, 0.08, 0.32]))
     else:
-        story.append(P("未發現超出預設門檻之數值。", small))
+        story.append(P("未發現超出門檻之數值。", note))
 
-    story.append(P("三、詰問審查歷程", h2))
-    for t in session.threads():
+    # 3
+    story += heading2("3. 詰問審查歷程")
+    story.append(P(f"Round 1 外審總體意見：{m.round1_summary}", note))
+    for n, t in enumerate(m.threads, 1):
         i, r, v = t["issue"], t["response"], t["verdict"]
-        rows = [[P(f"{i.issue_id}｜{i.title}（{i.category}）"),
-                 tag(v.risk_level.value) if v else P("")],
-                [P(f"[Round 1 質疑] {i.challenge}\n算式：{i.formula}\n"
-                   f"引用數據：{i.cited_data}｜依據：{i.code_reference}"), ""]]
-        if r:
-            text = f"[Round 2 回覆｜{r.stance.value}] {r.response}"
-            if r.calculation:
-                text += f"\n計算：{r.calculation}"
-            if r.proposed_action:
-                text += f"\n修正方案：{r.proposed_action}"
-            text += f"\n數據出處：{r.data_source}｜規範依據：{r.code_reference}"
-            rows.append([P(text), ""])
+        head = f"3.{n} {i.issue_id}　{i.title}（{i.category}）"
         if v:
-            text = f"[Round 3 終審｜{v.decision.value}] {v.rationale}"
+            head += f"　— 終審：{v.decision.value}／{JUDGE[v.risk_level]}"
+        rows = [[B("R1 外審質疑"), [P(i.challenge), P(i.formula, eq),
+                                     P(f"引用數據：{i.cited_data}｜依據：{i.code_reference}", note)]]]
+        if r:
+            body = [P(r.response)]
+            if r.calculation:
+                body.append(P(r.calculation, eq))
+            if r.proposed_action:
+                body.append(P(f"修正方案：{r.proposed_action}"))
+            body.append(P(f"數據出處：{r.data_source}｜規範依據：{r.code_reference}", note))
+            rows.append([B(f"R2 設計回覆\n（{r.stance.value}）"), body])
+        if v:
+            body = [P(v.rationale)]
             if v.required_action:
-                text += f"\n應辦事項：{v.required_action}"
-            rows.append([P(text), ""])
-        tbl = Table(rows, colWidths=[154 * mm, 20 * mm])
-        tbl.setStyle(TableStyle([
-            ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#d1d5db")),
-            ("LINEBELOW", (0, 0), (-1, -2), 0.3, colors.HexColor("#e5e7eb")),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2f7")),
-            *[("SPAN", (0, n), (1, n)) for n in range(1, len(rows))],
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ]))
-        story += [tbl, Spacer(1, 6)]
+                body.append(P(f"應辦事項：{v.required_action}", note))
+            rows.append([B(f"R3 外審終審\n（{v.decision.value}）"), body])
+        story.append(KeepTogether([B(head, h3), grid(rows, [0.16, 0.84], kv=True)]))
 
-    if session.notes:
-        story.append(P("四、系統紀錄", h2))
-        story += [P(f"• {n}", small) for n in session.notes]
+    # 4
+    story += heading2("4. 主任檢核技師裁決")
+    story.append(P(m.executive_summary))
+    for n, (_, label, items) in enumerate(m.buckets, 1):
+        story.append(B(f"4.{n} {label}（{len(items)} 項）", h3))
+        if not items:
+            story.append(P("無。", note))
+            continue
+        rows = [[B(h) for h in ("編號", "項目", "檢核結論", "判定依據", "處理意見")]]
+        rows += [[P(it.issue_id), P(it.title), P(it.finding), P(it.basis), P(it.recommendation)] for it in items]
+        story.append(grid(rows, [0.08, 0.16, 0.36, 0.2, 0.2]))
+    if m.observations:
+        story += [B("4.4 審查過程觀察", h3), P(m.observations, note)]
 
-    story += [Spacer(1, 12), P("聲明：本報告由大型語言模型輔助產生，內容可能有誤，僅供結構技師審查參考，"
-                               "不得取代依法辦理之結構簽證或外審。", small)]
+    # 彙總與總判定
+    story += heading2("檢核彙總與總判定")
+    rows = [[B(h) for h in ("檢核項目", "分類", "外審終審", "風險等級", "判定", "主任技師分類", "依據")]]
+    rows += [[P(f"{s.issue_id} {s.title}"), P(s.category), P(s.decision), P(s.risk), judge(s.judge), P(s.bucket), P(s.ref)]
+             for s in m.summary_rows]
+    story.append(grid(rows, [0.22, 0.1, 0.1, 0.1, 0.07, 0.12, 0.29]))
+    border = {"bad": "#cc0000", "warn": "#9A5E10", "ok": "#006600"}[m.verdict_level]
+    vt = Table([[B(m.verdict_text, ParagraphStyle("v", parent=base, fontSize=11, leading=15))]])
+    vt.setStyle(TableStyle([("BOX", (0, 0), (-1, -1), 1.6, colors.HexColor(border)),
+                            ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6)]))
+    vt.hAlign = "LEFT"
+    story += [Spacer(1, 4), vt]
+    if m.verdict_items:
+        label = "重大疑義" if m.verdict_level == "bad" else "待複核項目"
+        story.append(P(f"{label}：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.verdict_items, 1)), note))
+    story.append(P("總判定依主任檢核技師分類：有任一重大疑義為「退回補正」，僅有待複核項目為「修正後同意」，其餘為「同意備查」；"
+                   "「未涵蓋」項目須另行檢核，不計入本判定。", note))
+
+    # 附註
+    story += heading2("附註")
+    lines = [
+        "1. 本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。",
+        "2. 模型引用之條號與數值應由審查技師對照規範原文確認；初篩條號已依土木401-112 與建築物耐震設計規範及解說（113 年版）原文核對。",
+        "3. 判定用語：OK＝疑義解除；注意＝須補充資料或修正後複核；NG＝不符規範或影響結構安全。",
+    ] + [f"{k}. 系統紀錄：{n}" for k, n in enumerate(m.notes, 4)]
+    story.append(P("\n".join(lines), note))
+    story.append(P("本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。", note))
+
+    # 簽核欄（審查／校核／審核）
+    sign = Table([[B(r) for r in m.sign_roles], [""] * 3, [P("日期：")] * 3],
+                 colWidths=[width / 3] * 3, rowHeights=[None, 16 * mm, None])
+    sign.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.5, grid_c), ("BACKGROUND", (0, 0), (-1, 0), head_c),
+                              ("ALIGN", (0, 0), (-1, 0), "CENTER")]))
+    story += [Spacer(1, 14), KeepTogether([sign])]
 
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont(font, 8)
-        canvas.setFillColor(colors.grey)
-        canvas.drawCentredString(A4[0] / 2, 10 * mm, f"第 {doc.page} 頁")
+        canvas.setFillColor(colors.HexColor("#444444"))
+        canvas.drawRightString(A4[0] - 12 * mm, 9 * mm, f"第 {doc.page} 頁")
+        canvas.drawString(12 * mm, 9 * mm, m.report_no)
         canvas.restoreState()
 
     buf = io.BytesIO()
-    SimpleDocTemplate(buf, pagesize=A4, leftMargin=18 * mm, rightMargin=18 * mm,
-                      topMargin=18 * mm, bottomMargin=18 * mm,
-                      title="結構計算書審查報告").build(story, onFirstPage=footer, onLaterPages=footer)
+    SimpleDocTemplate(buf, pagesize=A4, leftMargin=12 * mm, rightMargin=12 * mm, topMargin=14 * mm,
+                      bottomMargin=16 * mm, title=m.title).build(story, onFirstPage=footer, onLaterPages=footer)
     return buf.getvalue()

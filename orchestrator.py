@@ -45,6 +45,7 @@ class ReviewSession:
     findings: list[dict]
     provider: str = ""
     model: str = ""
+    source: dict = field(default_factory=dict)  # 輸入檔名、雜湊、工作表與辨識欄位、初篩門檻
     started_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
     round1: S.Round1Output | None = None
     round2: S.Round2Output | None = None
@@ -72,6 +73,7 @@ class ReviewSession:
             "provider": self.provider,
             "model": self.model,
             "started_at": self.started_at,
+            "source": self.source,
             "prechecks": self.findings,
             "round1_challenges": dump(self.round1),
             "round2_responses": dump(self.round2),
@@ -132,6 +134,14 @@ class ReviewOrchestrator:
             findings=[f.as_dict() for f in summary.findings],
             provider=c.provider,
             model=c.model,
+            source={
+                "file": summary.source_name,
+                "sha256": summary.sha256,
+                "sheets": [
+                    {"name": sh.name, "rows": sh.n_rows, "mapped": sh.mapped} for sh in summary.sheets
+                ],
+                "limits": summary.limits,
+            },
         )
         self.round1(session)
         self.round2(session)

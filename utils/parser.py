@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 from dataclasses import dataclass, field
@@ -33,11 +34,11 @@ COLUMN_ALIASES: dict[str, list[str]] = {
 
 # 規則式初篩門檻（預設值；實際案件可在 UI 調整）
 DEFAULT_LIMITS = {
-    # 建築物耐震設計規範 3.13 層間相對側向位移角限制
+    # 建築物耐震設計規範及解說 §2.16.1 容許層間相對側向位移角
     "drift_max": 0.005,
-    # 土木401 梁拉力筋上限（耐震 15.3.2.1 規定 ρ ≤ 0.025）
+    # 土木401-112 §18.3.3.1 特殊抗彎矩構架梁 ρ ≤ 0.025
     "beam_rho_max": 0.025,
-    # 土木401 柱主筋比 1%～8%（耐震特別抗彎矩構架 15.4.3.1 上限 6%）
+    # 土木401-112 §18.4.4.1 特殊抗彎矩構架柱 0.01Ag ≤ Ast ≤ 0.06Ag（一般柱 §10.6.1.1 為 1%～8%）
     "col_rho_min": 0.01,
     "col_rho_max": 0.06,
     # 強度需求／容量比
@@ -45,7 +46,16 @@ DEFAULT_LIMITS = {
     "dcr_warn": 0.95,
 }
 
-# 常見應有的載重組合（建築物耐震設計規範／土木401 9.2），以正規式檢查是否遺漏
+# 初篩項目引用之條號（已對照 rc-member-designer specs/ 規範原文）
+REF = {
+    "drift": "建築物耐震設計規範及解說 §2.16.1",
+    "beam_rho": "土木401-112 §18.3.3.1",
+    "col_rho": "土木401-112 §18.4.4.1（一般柱 §10.6.1.1）",
+    "dcr": "土木401-112 §9.5.1.1、§10.5.1.1（φS_n ≥ U）",
+    "combo": "土木401-112 §5.3.1（表 5.3.1）",
+}
+
+# 常見應有的載重組合（土木401-112 §5.3.1 表 5.3.1），以正規式檢查是否遺漏
 EXPECTED_COMBOS = {
     "1.4D": r"1\.4\s*d(?![a-z])",
     "1.2D+1.6L": r"1\.2\s*d\s*\+\s*1\.6\s*l",
@@ -66,6 +76,7 @@ class Finding:
     item: str
     detail: str
     reference: str
+    check: str = ""  # drift / beam_rho / col_rho / dcr / combo
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -87,6 +98,8 @@ class StructuralSummary:
     sheets: list[SheetSummary]
     findings: list[Finding]
     frames: dict[str, pd.DataFrame] = field(default_factory=dict, repr=False)
+    sha256: str = ""  # 輸入檔雜湊，列於報告表頭供追溯
+    limits: dict = field(default_factory=dict)  # 本次初篩採用之門檻
 
     def to_prompt_text(self, project_info: dict | None = None) -> str:
         """組成給 LLM 的結構數據摘要。"""
@@ -206,7 +219,7 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
                 findings.append(Finding(
                     "High", name, f"層間位移角 {_label(df.loc[idx], mapped)}",
                     f"{v:.4f} > 限值 {limits['drift_max']}",
-                    "建築物耐震設計規範及解說 3.13",
+                    REF["drift"], check="drift",
                 ))
 
     if "rebar_ratio" in mapped:
@@ -219,13 +232,13 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             if kind == "beam" and v > limits["beam_rho_max"]:
                 findings.append(Finding(
                     "High", name, f"梁配筋比 {label}",
-                    f"ρ = {v:.2%} > {limits['beam_rho_max']:.1%}", "土木401 耐震設計 15.3.2",
+                    f"ρ = {v:.2%} > {limits['beam_rho_max']:.1%}", REF["beam_rho"], check="beam_rho",
                 ))
             elif kind == "column" and not (limits["col_rho_min"] <= v <= limits["col_rho_max"]):
                 findings.append(Finding(
                     "High", name, f"柱主筋比 {label}",
                     f"ρg = {v:.2%} 不在 {limits['col_rho_min']:.0%}～{limits['col_rho_max']:.0%}",
-                    "土木401 10.9.1／15.4.3",
+                    REF["col_rho"], check="col_rho",
                 ))
 
     if "dcr" in mapped:
@@ -237,12 +250,12 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             if v > limits["dcr_max"]:
                 findings.append(Finding(
                     "High", name, f"應力比 {label}", f"D/C = {v:.2f} > {limits['dcr_max']}",
-                    "土木401 9.1 強度設計 φSn ≥ Su",
+                    REF["dcr"], check="dcr",
                 ))
             elif v > limits["dcr_warn"]:
                 findings.append(Finding(
                     "Medium", name, f"應力比 {label}", f"D/C = {v:.2f}，餘裕不足 5%",
-                    "土木401 9.1",
+                    REF["dcr"], check="dcr",
                 ))
 
     if "load_combo" in mapped:
@@ -251,7 +264,7 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
             if not re.search(pattern, combos):
                 findings.append(Finding(
                     "Medium", name, "載重組合", f"未見「{label}」相關組合",
-                    "建築物耐震設計規範 2.17／土木401 9.2",
+                    REF["combo"], check="combo",
                 ))
     return findings
 
@@ -334,7 +347,10 @@ def parse_structural_file(
         raise ValueError("檔案中沒有可讀取的資料")
     order = {"High": 0, "Medium": 1, "Info": 2}
     findings.sort(key=lambda f: order.get(f.level, 9))
-    return StructuralSummary(source_name=filename, sheets=sheets, findings=findings, frames=frames)
+    return StructuralSummary(
+        source_name=filename, sheets=sheets, findings=findings, frames=frames,
+        sha256=hashlib.sha256(data).hexdigest(), limits=lim,
+    )
 
 
 def _has_tabulate() -> bool:
