@@ -162,12 +162,21 @@ def map_columns(columns: list[str]) -> dict[str, str]:
     return mapped
 
 
+def _text(series: pd.Series) -> pd.Series:
+    """欄位轉文字，空白格轉成空字串。
+
+    pandas 3 的 astype(str) 會把空白格保留為缺值（NaN），直接 join 會出錯，所以統一經過這裡轉換。
+    """
+    return series.map(lambda v: "" if pd.isna(v) else str(v))
+
+
 def _to_ratio(series: pd.Series) -> pd.Series:
     """數值化；若看起來是百分比（例如 1.8 代表 1.8%）則換算為小數。"""
-    s = pd.to_numeric(series.astype(str).str.replace("%", "", regex=False), errors="coerce")
+    text = _text(series)
+    s = pd.to_numeric(text.str.replace("%", "", regex=False), errors="coerce")
     if s.dropna().empty:
         return s
-    if series.astype(str).str.contains("%").any() or s.dropna().max() > 0.2:
+    if text.str.contains("%").any() or s.dropna().max() > 0.2:
         s = s / 100.0
     return s
 
@@ -196,13 +205,13 @@ def _drift_to_ratio(series: pd.Series) -> pd.Series:
 
 
 def _label(row: pd.Series, mapped: dict[str, str]) -> str:
-    parts = [str(row[mapped[k]]) for k in ("story", "member") if k in mapped]
+    parts = [str(row[mapped[k]]) for k in ("story", "member") if k in mapped and pd.notna(row[mapped[k]])]
     return " ".join(parts) or f"第 {row.name + 1} 列"
 
 
 def _member_kind(row: pd.Series, mapped: dict[str, str], sheet_name: str) -> str:
     text = " ".join(
-        str(row[mapped[k]]) for k in ("member_type", "member") if k in mapped
+        str(row[mapped[k]]) for k in ("member_type", "member") if k in mapped and pd.notna(row[mapped[k]])
     ) + " " + sheet_name
     t = text.lower()
     if any(k in t for k in ("柱", "column", "col")) or re.search(r"\bc\d", t):
@@ -266,7 +275,7 @@ def run_prechecks(name: str, df: pd.DataFrame, mapped: dict[str, str], limits: d
                 ))
 
     if "load_combo" in mapped:
-        combos = " | ".join(df[mapped["load_combo"]].astype(str)).lower()
+        combos = " | ".join(_text(df[mapped["load_combo"]])).lower()
         for label, pattern in EXPECTED_COMBOS.items():
             if not re.search(pattern, combos):
                 findings.append(Finding(

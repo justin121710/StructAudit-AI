@@ -111,3 +111,33 @@ def test_pdf_generation(summary, engine):
     assert "測試案" in render_html(s)
     pdf, used = generate_pdf(s, engine)
     assert used == engine and pdf.startswith(b"%PDF")
+
+
+def test_model_filters_keep_text_models_only():
+    from agents.llm_client import filter_gemini_models, filter_openai_models
+
+    ids = ["gpt-4.1", "gpt-4o-mini", "o3", "text-embedding-3-large", "whisper-1", "dall-e-3",
+           "gpt-4o-realtime-preview", "gpt-3.5-turbo-instruct", "tts-1", "gpt-4.1"]
+    assert filter_openai_models(ids) == ["o3", "gpt-4o-mini", "gpt-4.1"]
+    models = [("models/gemini-2.5-pro", ["generateContent", "countTokens"]),
+              ("models/gemini-2.5-flash", ["generateContent"]),
+              ("models/text-embedding-004", ["embedContent"]),
+              ("models/imagen-3.0-generate-002", ["predict"]),
+              ("models/gemini-2.5-flash-preview-tts", ["generateContent"])]
+    assert filter_gemini_models(models) == ["gemini-2.5-pro", "gemini-2.5-flash"]
+
+
+def test_per_agent_models_recorded_in_report(summary):
+    from utils.report_model import build_model
+
+    shared = MockClient()  # 示範 client 需共用狀態；這裡只改模型名稱來模擬三個不同模型
+    clients = {}
+    for agent, name in (("A", "gemini-2.5-flash"), ("B", "gemini-2.5-pro"), ("C", "gpt-4.1")):
+        c = MockClient()
+        c.model, c._severity, c._source = name, shared._severity, shared._source
+        clients[agent] = c
+    s = ReviewOrchestrator(clients).run(summary)
+    assert s.agent_models == {"A": "mock / gemini-2.5-flash", "B": "mock / gemini-2.5-pro", "C": "mock / gpt-4.1"}
+    meta = {k: v for k, v, _ in build_model(s).meta}
+    assert "A 原設計工程師：mock / gemini-2.5-flash" in meta["語言模型"]
+    assert "C 主任檢核技師：mock / gpt-4.1" in meta["語言模型"]

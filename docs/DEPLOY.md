@@ -41,13 +41,10 @@ Streamlit Community Cloud 是 Streamlit 官方的免費託管服務，直接從 
    ```toml
    GEMINI_API_KEY = "你的 Gemini API Key"
    OPENAI_API_KEY = "你的 OpenAI API Key"
-
-   # 選填：預設模型
-   # GEMINI_MODEL = "gemini-2.5-pro"
-   # OPENAI_MODEL = "gpt-4.1"
    ```
 
-   設定 Secrets 後，介面會預設使用該服務，使用者不必自己輸入 Key。
+   設定 Secrets 後，介面會用這把 Key 查詢可用模型，使用者直接從下拉選單挑三個 Agent 的模型，不必自己輸入 Key。
+   Secrets 中的 Key 只留在伺服器，不會出現在網頁上；使用者也可以在介面輸入自己的 Key 改用自己的額度。
    不填 Secrets 也能部署：介面會預設「離線示範」，或由使用者自行在介面輸入 API Key。
 
 ### 4. 部署

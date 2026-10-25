@@ -81,6 +81,7 @@ class ReviewSession:
     findings: list[dict]
     provider: str = ""
     model: str = ""
+    agent_models: dict = field(default_factory=dict)  # A／B／C -> "provider / model"
     source: dict = field(default_factory=dict)  # 輸入檔名、雜湊、工作表與辨識欄位、初篩門檻
     started_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
     round1: S.Round1Output | None = None
@@ -109,6 +110,7 @@ class ReviewSession:
             "project_info": self.project_info,
             "provider": self.provider,
             "model": self.model,
+            "agent_models": self.agent_models,
             "started_at": self.started_at,
             "source": self.source,
             "prechecks": self.findings,
@@ -179,6 +181,7 @@ class ReviewOrchestrator:
             findings=[f.as_dict() for f in summary.findings],
             provider=c.provider,
             model=c.model,
+            agent_models={k: f"{cl.provider} / {cl.model}" for k, cl in self.clients.items()},
             source={
                 "file": summary.source_name,
                 "sha256": summary.sha256,

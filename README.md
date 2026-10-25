@@ -28,9 +28,10 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-沒有設定 API Key 時預設「離線示範」，可直接走完整流程並產出報表。
-API Key 可在介面輸入，或用環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`、`.streamlit/secrets.toml`（參考 `secrets.toml.example`）。
-模型名稱可在介面修改，或以 `GEMINI_MODEL`／`OPENAI_MODEL` 設定預設值；`OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
+選「使用 AI 模型」並提供 API Key（介面輸入，或環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`、`.streamlit/secrets.toml`）後，
+系統會用這把 Key 向 Gemini／OpenAI 查詢可用的文字模型，讓你分別指定 Agent A、B、C 使用的模型（兩家都有 Key 時可混用）。
+報告表頭會列出每個 Agent 使用的模型。沒有 Key 時可選「離線示範」走完整流程並產出報表。
+`OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
 
 ## 介面與審查對話
 
@@ -118,7 +119,7 @@ tests/                     pytest
 - **一致性保護**：疑義統一編號 Q1～Q5；A 未回覆者記為「未能抗辯」；B 未判定者列待複核；
   C 的分類不重不漏（重複者取較嚴重分類、遺漏者依 B 終審風險補入），總結論依分類結果校正。
   所有修正都記錄在報告「系統紀錄」中。
-- **分角色模型**：`ReviewOrchestrator({"A": client_a, "B": client_b, "C": client_c})` 可讓三個角色使用不同模型（例如 C 用較強的模型）。
+- **分角色模型**：介面可為 A／B／C 各選一個模型；程式中為 `ReviewOrchestrator({"A": client_a, "B": client_b, "C": client_c})`。
 - **PDF**：WeasyPrint 依 `templates/report_template.html` 排版；若系統缺少 Pango，自動改用 ReportLab
   依同一份報表資料產生相同章節的 PDF（會自動尋找系統中文字型嵌入）。WeasyPrint 需要中文字型，Linux 可安裝 `fonts-noto-cjk`。
 - **Excel**：模型輸出以「=」開頭時一律存成文字，不會被 Excel 當成公式執行。

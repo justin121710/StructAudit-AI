@@ -13,7 +13,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from agents.llm_client import DEFAULT_MODELS, create_client
+from agents.llm_client import PROVIDER_LABEL, MockClient, create_client, list_models
 from orchestrator import AGENT_NAMES, DialogueMessage, ReviewOrchestrator, ReviewSession
 from utils.parser import DEFAULT_LIMITS, StructuralSummary, parse_structural_file
 from utils.pdf_generator import generate_pdf
@@ -21,8 +21,11 @@ from utils.report_model import build_model, report_number
 from utils.xlsx_report import generate_xlsx
 
 SAMPLE_FILE = Path(__file__).parent / "examples" / "sample_structure.xlsx"
-PROVIDERS = {"離線示範（不呼叫 API）": "mock", "Google Gemini": "gemini", "OpenAI": "openai"}
 KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
+MODE_AI, MODE_DEMO = "使用 AI 模型", "離線示範（不呼叫 API）"
+AGENT_PICK = {"A": "Agent A｜原設計工程師", "B": "Agent B｜外部審查專家", "C": "Agent C｜主任檢核技師"}
+# 預設模型：依序取第一個查得到的；都沒有時取名稱含 pro 的，再不然取清單第一個
+PREFERRED_MODELS = ["gemini-2.5-pro", "gpt-4.1", "gemini-2.5-flash", "gpt-4o"]
 # 頭像用 Material 線條圖示（不用 emoji），與 rc-member-designer 的線條圖示風格一致
 AVATAR = {"A": ":material/architecture:", "B": ":material/rate_review:", "C": ":material/gavel:"}
 ROLE_INTRO = {
@@ -75,8 +78,9 @@ def dialogue_header() -> None:
 class DialogueView:
     """把 Agent 發言依回合畫成對話；審查進行中逐則追加，完成後由 transcript 重繪。"""
 
-    def __init__(self, box):
+    def __init__(self, box, models: dict[str, str] | None = None):
         self.box, self.stage = box, None
+        self.models = models or {}  # A／B／C -> 模型名稱，顯示在發言者旁
 
     def add(self, msg: DialogueMessage) -> None:
         with self.box:
@@ -85,21 +89,63 @@ class DialogueView:
                 st.markdown(f'<div class="stage">{STAGE_TITLE[msg.stage]}</div>'
                             f'<div class="stage-intro">{STAGE_INTRO[msg.stage]}</div>', unsafe_allow_html=True)
             with st.chat_message(msg.agent, avatar=AVATAR[msg.agent]):
-                st.markdown(f"**{msg.speaker}**　{msg.title}\n\n{msg.body}")
+                model = f"（{self.models[msg.agent]}）" if msg.agent in self.models else ""
+                st.markdown(f"**{msg.speaker}**{model}　{msg.title}\n\n{msg.body}")
 
 
 st.markdown("## 結構計算書審查")
 st.caption(f"{AGENT_NAMES['B']} 質疑 → {AGENT_NAMES['A']} 回覆 → {AGENT_NAMES['B']} 終審 → {AGENT_NAMES['C']} 裁決")
 
 # ---------------------------------------------------------------- 設定
+@st.cache_data(ttl=3600, show_spinner="查詢可用模型中…")
+def fetch_models(provider: str, api_key: str) -> list[str]:
+    return list_models(provider, api_key)
+
+
+def default_index(options: list[tuple[str, str]]) -> int:
+    names = [m for _, m in options]
+    for want in PREFERRED_MODELS:
+        if want in names:
+            return names.index(want)
+    return next((i for i, m in enumerate(names) if "pro" in m), 0)
+
+
 has_key = any(secret(k) for k in KEY_ENV.values())
+agent_models: dict[str, tuple[str, str]] = {}  # A／B／C -> (provider, model)
+keys: dict[str, str] = {}
 with st.container(border=True, key="card_setup"):
-    provider = PROVIDERS[st.selectbox("LLM 服務", list(PROVIDERS), index=1 if has_key else 0)]
-    model = api_key = None
-    if provider != "mock":
-        c1, c2 = st.columns(2)
-        model = c1.text_input("模型名稱", DEFAULT_MODELS[provider])
-        api_key = c2.text_input("API Key", value=secret(KEY_ENV[provider]), type="password")
+    mode = st.radio("審查方式", [MODE_AI, MODE_DEMO], index=0 if has_key else 1, horizontal=True)
+    if mode == MODE_AI:
+        with st.expander("API Key", expanded=not has_key):
+            for prov, env in KEY_ENV.items():
+                label = PROVIDER_LABEL[prov]
+                # 部署端設定的 Key 只留在伺服器，不放進輸入框（否則會傳到使用者的瀏覽器）
+                preset = secret(env)
+                typed = st.text_input(f"{label} API Key", type="password",
+                                      placeholder="已使用部署設定的 Key，輸入可改用自己的" if preset else "")
+                if typed or preset:
+                    keys[prov] = typed or preset
+            st.caption("至少填一家；兩家都有 Key 時，三個 Agent 可以混用不同服務商的模型。")
+
+        options: list[tuple[str, str]] = []
+        failed = False
+        for prov, key in keys.items():
+            try:
+                options += [(prov, m) for m in fetch_models(prov, key)]
+            except Exception as e:
+                failed = True
+                st.warning(str(e))
+        if options:
+            st.markdown("**指定三個 Agent 的模型**")
+            fmt = lambda o: f"{PROVIDER_LABEL[o[0]]}｜{o[1]}"  # noqa: E731
+            idx = default_index(options)
+            for agent, label in AGENT_PICK.items():
+                agent_models[agent] = st.selectbox(label, options, index=idx, format_func=fmt, key=f"model_{agent}")
+            if st.button("重新查詢模型清單", type="tertiary"):
+                fetch_models.clear()
+                st.rerun()
+        elif keys and not failed:
+            st.caption("此 API Key 查不到可用的文字模型。")
 
     uploaded = st.file_uploader("結構摘要檔（Excel／CSV）", type=["xlsx", "xls", "xlsm", "csv"])
     use_sample = st.checkbox("使用示範資料", value=uploaded is None)
@@ -143,24 +189,27 @@ if summary:
         if not summary.findings:
             st.markdown('<div class="alert a-ok">未發現超出門檻之數值。</div>', unsafe_allow_html=True)
 
-need_key = provider != "mock" and not api_key
-run = st.button("開始審查", type="primary", width="stretch", disabled=summary is None or need_key, key="run")
-if need_key:
-    st.caption("請輸入 API Key，或改用離線示範。")
+need_models = mode == MODE_AI and len(agent_models) < 3
+run = st.button("開始審查", type="primary", width="stretch", disabled=summary is None or need_models, key="run")
+if need_models:
+    st.caption("請輸入 API Key 並選好三個 Agent 的模型，或改用離線示範。")
 
 # ---------------------------------------------------------------- 審查對話
 if run and summary is not None:
     st.session_state.pop("review", None)
     dialogue_header()
     status = st.status("審查進行中…", expanded=False)  # 進度放在對話上方，不會被逐漸變長的對話推到下面
-    view = DialogueView(st.container())
+    shown = {a: m for a, (_, m) in agent_models.items()} if mode == MODE_AI else {}
+    view = DialogueView(st.container(), shown)
     with status:
         try:
-            client = create_client(provider, model=model, api_key=api_key)
-            if provider == "mock":
-                client.delay = 0.6  # 離線示範瞬間完成，稍作停頓才看得出逐回合的對話
+            if mode == MODE_DEMO:
+                # 離線示範瞬間完成，稍作停頓才看得出逐回合的對話；三個角色共用同一個示範用 client
+                clients = MockClient(delay=0.6)
+            else:
+                clients = {a: create_client(p, model=m, api_key=keys[p]) for a, (p, m) in agent_models.items()}
             orch = ReviewOrchestrator(
-                client,
+                clients,
                 on_progress=lambda stage, text: status.update(label=text),
                 on_message=view.add,
             )
@@ -174,7 +223,8 @@ else:
     session = st.session_state.get("review")
     if session:
         dialogue_header()
-        view = DialogueView(st.container())
+        shown = {a: v.split(" / ", 1)[-1] for a, v in session.agent_models.items() if session.provider != "mock"}
+        view = DialogueView(st.container(), shown)
         for msg in session.transcript:
             view.add(msg)
 

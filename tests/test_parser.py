@@ -64,3 +64,25 @@ def test_sample_workbook_and_prompt_text():
 def test_unsupported_format():
     with pytest.raises(ValueError):
         parse_structural_file(b"abc", filename="model.e2k")
+
+
+def test_blank_cells_in_text_columns():
+    """空白格不得造成解析失敗（pandas 3 的 astype(str) 會保留 NaN）。"""
+    import io
+
+    import numpy as np
+
+    df = pd.DataFrame({
+        "樓層": [np.nan, "2F", "3F"],
+        "構件": ["B1", np.nan, "C1"],
+        "配筋比 (%)": [2.8, np.nan, "0.8%"],
+        "D/C": [np.nan, 1.05, 0.5],
+        "載重組合": [np.nan, "1.4D", "1.2D+1.6L"],
+    })
+    buf = io.BytesIO()
+    df.to_excel(buf, index=False)
+    s = parse_structural_file(buf.getvalue(), filename="blank.xlsx")
+    items = [f.item for f in s.findings]
+    assert "應力比 2F" in items  # 構件空白時只顯示樓層
+    assert not any("nan" in i for i in items)
+    assert any(f.check == "combo" for f in s.findings)

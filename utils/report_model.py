@@ -93,6 +93,15 @@ def trace_text(session: ReviewSession) -> str:
     return f"v{__version__}｜輸入 SHA-256 {sha[:12] or '—'}"
 
 
+def model_text(session: ReviewSession) -> str:
+    """三個 Agent 用同一個模型時只寫一次，否則逐一列出。"""
+    models = session.agent_models or {"B": f"{session.provider} / {session.model}"}
+    if len(set(models.values())) == 1:
+        return next(iter(models.values()))
+    roles = {"A": "A 原設計工程師", "B": "B 外部審查專家", "C": "C 主任檢核技師"}
+    return "；".join(f"{roles[k]}：{models[k]}" for k in ("A", "B", "C") if k in models)
+
+
 def verdict(chief: S.ChiefReport) -> tuple[str, str, list[str]]:
     c = chief.overall_conclusion
     if c == S.OverallConclusion.RETURNED:
@@ -117,7 +126,7 @@ def build_model(session: ReviewSession) -> ReportModel:
     meta += [
         ("審查依據", CODE_BASIS, True),
         ("審查方式", REVIEW_METHOD, True),
-        ("語言模型", f"{session.provider} / {session.model}", False),
+        ("語言模型", model_text(session), len(set(session.agent_models.values())) > 1),
         ("產生時間", session.started_at, False),
         ("程式版本／雜湊", trace_text(session), True),
     ]

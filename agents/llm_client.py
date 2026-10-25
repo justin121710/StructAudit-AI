@@ -380,6 +380,55 @@ def _designer_text(severity: str, f: dict) -> dict:
             "calculation": f"φSn ≥ U：D/C = {f.get('value', 0):.2f} ≤ {f.get('limit', 1):.2f}"}
 
 
+# ---------------------------------------------------------------------------
+# 以使用者的 API Key 查詢可用模型
+# ---------------------------------------------------------------------------
+PROVIDER_LABEL = {"gemini": "Gemini", "openai": "OpenAI"}
+# 不能用來對話／產生文字的模型（嵌入、影像、語音、即時串流、搜尋等）
+_NON_TEXT = ("embed", "imagen", "image", "tts", "audio", "realtime", "transcribe", "whisper",
+             "dall-e", "moderation", "aqa", "veo", "live", "search", "instruct")
+_OPENAI_CHAT_PREFIX = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+
+
+def _is_text_model(name: str) -> bool:
+    return not any(k in name.lower() for k in _NON_TEXT)
+
+
+def filter_openai_models(ids: list[str]) -> list[str]:
+    keep = [i for i in ids if i.startswith(_OPENAI_CHAT_PREFIX) and _is_text_model(i)]
+    return sorted(set(keep), reverse=True)
+
+
+def filter_gemini_models(models: list[tuple[str, list[str]]]) -> list[str]:
+    """models：(名稱, supported_actions)。只保留支援 generateContent 的文字模型。"""
+    keep = [name.removeprefix("models/") for name, actions in models
+            if "generateContent" in (actions or []) and _is_text_model(name)]
+    return sorted(set(keep), reverse=True)
+
+
+def list_models(provider: str, api_key: str) -> list[str]:
+    """用使用者的 API Key 向服務商查詢可用的文字模型；Key 無效或連線失敗時拋出 LLMError。"""
+    try:
+        if provider == "openai":
+            from openai import OpenAI
+
+            client = OpenAI(api_key=api_key, base_url=os.getenv("OPENAI_BASE_URL") or None)
+            return filter_openai_models([m.id for m in client.models.list()])
+        if provider == "gemini":
+            from google import genai
+
+            client = genai.Client(api_key=api_key)
+            return filter_gemini_models([(m.name or "", list(m.supported_actions or []))
+                                         for m in client.models.list()])
+    except Exception as e:
+        label = PROVIDER_LABEL.get(provider, provider)
+        text = str(e)
+        if any(k in text for k in ("API key not valid", "API_KEY_INVALID", "Incorrect API key", "401")):
+            raise LLMError(f"{label} API Key 無效，請確認是否複製完整、是否已啟用。") from e
+        raise LLMError(f"{label} 查詢模型失敗：{text[:200]}") from e
+    raise LLMError(f"未知的 provider：{provider}")
+
+
 def create_client(provider: str, model: str | None = None, api_key: str | None = None) -> LLMClient:
     provider = provider.lower()
     if provider == "openai":
@@ -391,4 +440,4 @@ def create_client(provider: str, model: str | None = None, api_key: str | None =
     raise LLMError(f"未知的 provider：{provider}")
 
 
-__all__ = ["LLMClient", "LLMError", "create_client", "schema_text", "extract_json"]
+__all__ = ["LLMClient", "LLMError", "create_client", "list_models", "schema_text", "extract_json"]
