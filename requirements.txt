@@ -7,6 +7,7 @@ jinja2>=3.1
 # LLM SDK（擇一或皆裝）
 openai>=1.40
 google-genai>=1.0
+anthropic>=2.0
 # PDF：WeasyPrint 需系統安裝 Pango；無法安裝時自動改用 ReportLab
 weasyprint>=60
 reportlab>=4.0

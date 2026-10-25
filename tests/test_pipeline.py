@@ -141,3 +141,41 @@ def test_per_agent_models_recorded_in_report(summary):
     meta = {k: v for k, v, _ in build_model(s).meta}
     assert "A 原設計工程師：mock / gemini-2.5-flash" in meta["語言模型"]
     assert "C 主任檢核技師：mock / gpt-4.1" in meta["語言模型"]
+
+
+def test_claude_client_request_shape(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    from agents.llm_client import ClaudeClient
+
+    calls = []
+
+    def reply(stop="end_turn", text='{"ok": 1}'):
+        return NS(stop_reason=stop, stop_details=NS(category="cyber") if stop == "refusal" else None,
+                  content=[NS(type="thinking", thinking=""), NS(type="text", text=text)])
+
+    class FakeMessages:
+        def __init__(self, beta):
+            self.beta = beta
+
+        def create(self, **kw):
+            calls.append((self.beta, kw))
+            return FakeMessages.next_reply
+
+    fake = NS(messages=FakeMessages(False), beta=NS(messages=FakeMessages(True)))
+    c = ClaudeClient("claude-opus-5-5", api_key="k")
+    c._client = fake
+    FakeMessages.next_reply = reply()
+    assert c._complete("sys", "user", 0.3) == '{"ok": 1}'
+    beta, kw = calls[-1]
+    assert beta and kw["fallbacks"] == "default" and kw["betas"] == ["server-side-fallback-2026-07-01"]
+    assert "temperature" not in kw and kw["system"] == "sys" and kw["max_tokens"] == 16000
+
+    c.model = "claude-haiku-4-5"  # 不支援備援的模型改走一般端點
+    c._complete("sys", "user", 0.3)
+    beta, kw = calls[-1]
+    assert not beta and "fallbacks" not in kw
+
+    FakeMessages.next_reply = reply("refusal")
+    with pytest.raises(LLMError, match="拒絕"):
+        c._complete("sys", "user", 0.3)

@@ -48,10 +48,11 @@ def test_pick_three_models_with_api_key(monkeypatch):
     assert seen["key"] == secret_key  # 用部署設定的 Key 查詢模型
     assert all(t.value == "" for t in at.text_input if "API Key" in t.label)  # Key 不會送到瀏覽器
     picks = {s.key: s for s in at.selectbox if s.key and s.key.startswith("model_")}
-    assert set(picks) == {"model_A", "model_B", "model_C"}
-    assert picks["model_B"].value == ("gemini", "gemini-2.5-pro")  # 預設取偏好清單第一個
-    picks["model_A"].set_value(("gemini", "gemini-2.5-flash"))
-    picks["model_C"].set_value(("gemini", "gemini-2.0-flash"))
+    assert set(picks) == {"model_A_gemini", "model_B_gemini", "model_C_gemini"}
+    assert not [s for s in at.selectbox if s.key and s.key.startswith("prov_")]  # 只有一家時不顯示服務商選單
+    assert picks["model_B_gemini"].value == "gemini-2.5-pro"  # 預設取偏好清單第一個
+    picks["model_A_gemini"].set_value("gemini-2.5-flash")
+    picks["model_C_gemini"].set_value("gemini-2.0-flash")
     at.run()
     at.button(key="run").click().run()
     assert not at.exception
@@ -78,4 +79,41 @@ def test_secret_name_variants_are_recognised(monkeypatch):
     assert not at.exception
     assert seen == {"openai": "sk-openai-test"}
     picks = [s for s in at.selectbox if s.key and s.key.startswith("model_")]
-    assert len(picks) == 3 and picks[0].value == ("openai", "gpt-4.1")
+    assert len(picks) == 3 and picks[0].value == "gpt-4.1"
+
+
+def test_multiple_providers_pick_provider_then_model(monkeypatch):
+    """有兩家以上的 Key 時，先選服務商再選模型；模型清單只列該服務商的模型。"""
+    import agents.llm_client as llm
+
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "c-key")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    catalog = {"gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
+               "claude": ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]}
+    monkeypatch.setattr(llm, "list_models", lambda provider, api_key: catalog[provider])
+    shared = llm.MockClient()
+
+    def fake_create(provider, model=None, api_key=None):
+        c = llm.MockClient()
+        c.model, c._severity, c._source = model, shared._severity, shared._source
+        c.provider = provider
+        return c
+
+    monkeypatch.setattr(llm, "create_client", fake_create)
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
+    at.run()
+    assert not at.exception
+    provs = {s.key: s for s in at.selectbox if s.key and s.key.startswith("prov_")}
+    assert set(provs) == {"prov_A", "prov_B", "prov_C"}
+    provs["prov_C"].set_value("claude")
+    at.run()
+    model_c = next(s for s in at.selectbox if s.key == "model_C_claude")
+    assert model_c.options == catalog["claude"] and model_c.value == "claude-opus-5-5"
+    model_c.set_value("claude-sonnet-5-5")
+    at.run()
+    at.button(key="run").click().run()
+    assert not at.exception
+    s = at.session_state["review"]
+    assert s.agent_models["A"] == "gemini / gemini-2.5-pro"
+    assert s.agent_models["C"] == "claude / claude-sonnet-5-5"

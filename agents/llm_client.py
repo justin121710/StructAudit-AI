@@ -24,6 +24,7 @@ T = TypeVar("T", bound=BaseModel)
 DEFAULT_MODELS = {
     "openai": os.getenv("OPENAI_MODEL", "gpt-4.1"),
     "gemini": os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
+    "claude": os.getenv("CLAUDE_MODEL", "claude-opus-5-5"),
     "mock": "mock-reviewer",
 }
 
@@ -126,6 +127,39 @@ class OpenAIClient(LLMClient):
             else:
                 raise
         return resp.choices[0].message.content or ""
+
+
+# 支援伺服器端拒答備援的模型：模型基於安全理由拒答時，API 會在同一次請求內改由其他模型接手
+CLAUDE_FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
+
+
+class ClaudeClient(LLMClient):
+    provider = "claude"
+
+    def __init__(self, model: str | None = None, api_key: str | None = None, **kw):
+        super().__init__(model, **kw)
+        import anthropic
+
+        key = api_key or os.getenv("ANTHROPIC_API_KEY")
+        if not key:
+            raise LLMError("未設定 ANTHROPIC_API_KEY")
+        self._client = anthropic.Anthropic(api_key=key)
+
+    def _complete(self, system: str, user: str, temperature: float) -> str:
+        # 新版 API 已不接受 temperature；思考模式維持模型預設
+        kwargs = dict(model=self.model, max_tokens=16000, system=system,
+                      messages=[{"role": "user", "content": user}])
+        if self.model in CLAUDE_FALLBACK_MODELS:
+            resp = self._client.beta.messages.create(
+                betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
+        else:
+            resp = self._client.messages.create(**kwargs)
+        if resp.stop_reason == "refusal":
+            category = getattr(resp.stop_details, "category", None) if resp.stop_details else None
+            raise LLMError(f"Claude 拒絕回答此請求（類別：{category or '未提供'}）")
+        if resp.stop_reason == "max_tokens":
+            raise LLMError("Claude 回覆超過長度上限而被截斷")
+        return "".join(b.text for b in resp.content if b.type == "text")
 
 
 class GeminiClient(LLMClient):
@@ -383,7 +417,7 @@ def _designer_text(severity: str, f: dict) -> dict:
 # ---------------------------------------------------------------------------
 # 以使用者的 API Key 查詢可用模型
 # ---------------------------------------------------------------------------
-PROVIDER_LABEL = {"gemini": "Gemini", "openai": "OpenAI"}
+PROVIDER_LABEL = {"gemini": "Gemini", "openai": "OpenAI", "claude": "Claude"}
 # 不能用來對話／產生文字的模型（嵌入、影像、語音、即時串流、搜尋等）
 _NON_TEXT = ("embed", "imagen", "image", "tts", "audio", "realtime", "transcribe", "whisper",
              "dall-e", "moderation", "aqa", "veo", "live", "search", "instruct")
@@ -406,8 +440,29 @@ def filter_gemini_models(models: list[tuple[str, list[str]]]) -> list[str]:
     return sorted(set(keep), reverse=True)
 
 
+def list_claude_models(api_key: str) -> list[str]:
+    """Claude 的模型都能產生文字；只列仍在服務中的模型，新的排前面。"""
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        models = list(client.models.list(lifecycle=["active"]))
+    except anthropic.AuthenticationError as e:
+        raise LLMError("Claude API Key 無效，請確認是否複製完整、是否已啟用。") from e
+    except anthropic.PermissionDeniedError as e:
+        raise LLMError("Claude API Key 沒有讀取模型清單的權限，請在 Claude Console 確認此 Key 的權限。") from e
+    except anthropic.APIConnectionError as e:
+        raise LLMError("無法連線到 Claude API，請稍後再試。") from e
+    except anthropic.APIStatusError as e:
+        raise LLMError(f"Claude 查詢模型失敗（HTTP {e.status_code}）：{e.message[:200]}") from e
+    models.sort(key=lambda m: m.created_at, reverse=True)
+    return [m.id for m in models]
+
+
 def list_models(provider: str, api_key: str) -> list[str]:
     """用使用者的 API Key 向服務商查詢可用的文字模型；Key 無效或連線失敗時拋出 LLMError。"""
+    if provider == "claude":
+        return list_claude_models(api_key)
     try:
         if provider == "openai":
             from openai import OpenAI
@@ -437,6 +492,8 @@ def create_client(provider: str, model: str | None = None, api_key: str | None =
         return OpenAIClient(model, api_key=api_key)
     if provider == "gemini":
         return GeminiClient(model, api_key=api_key)
+    if provider == "claude":
+        return ClaudeClient(model, api_key=api_key)
     if provider == "mock":
         return MockClient(model)
     raise LLMError(f"未知的 provider：{provider}")

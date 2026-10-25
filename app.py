@@ -21,16 +21,21 @@ from utils.report_model import build_model, report_number
 from utils.xlsx_report import generate_xlsx
 
 SAMPLE_FILE = Path(__file__).parent / "examples" / "sample_structure.xlsx"
-KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}  # 建議的 Secrets 名稱
+KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY", "claude": "ANTHROPIC_API_KEY"}  # 建議的 Secrets 名稱
 # Secrets 名稱常見寫法（比對時忽略大小寫與底線），例如 OPEN_AI_KEY、openai_api_key 都能讀到
 KEY_ALIASES = {
     "gemini": {"GEMINIAPIKEY", "GEMINIKEY", "GOOGLEAPIKEY"},
     "openai": {"OPENAIAPIKEY", "OPENAIKEY"},
+    "claude": {"ANTHROPICAPIKEY", "ANTHROPICKEY", "CLAUDEAPIKEY", "CLAUDEKEY"},
 }
 MODE_AI, MODE_DEMO = "使用 AI 模型", "離線示範（不呼叫 API）"
 AGENT_PICK = {"A": "Agent A｜原設計工程師", "B": "Agent B｜外部審查專家", "C": "Agent C｜主任檢核技師"}
-# 預設模型：依序取第一個查得到的；都沒有時取名稱含 pro 的，再不然取清單第一個
-PREFERRED_MODELS = ["gemini-2.5-pro", "gpt-4.1", "gemini-2.5-flash", "gpt-4o"]
+# 各服務商的預設模型：依序取第一個查得到的；都沒有時取清單第一個
+PREFERRED_MODELS = {
+    "gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
+    "openai": ["gpt-4.1", "gpt-4o"],
+    "claude": ["claude-opus-5-5", "claude-sonnet-5-5"],
+}
 # 頭像用 Material 線條圖示（不用 emoji），與 rc-member-designer 的線條圖示風格一致
 AVATAR = {"A": ":material/architecture:", "B": ":material/rate_review:", "C": ":material/gavel:"}
 ROLE_INTRO = {
@@ -120,12 +125,11 @@ def fetch_models(provider: str, api_key: str) -> list[str]:
     return list_models(provider, api_key)
 
 
-def default_index(options: list[tuple[str, str]]) -> int:
-    names = [m for _, m in options]
-    for want in PREFERRED_MODELS:
+def default_index(provider: str, names: list[str]) -> int:
+    for want in PREFERRED_MODELS.get(provider, []):
         if want in names:
             return names.index(want)
-    return next((i for i, m in enumerate(names) if "pro" in m), 0)
+    return 0
 
 
 has_key = any(secret_key(p) for p in KEY_ENV)
@@ -143,23 +147,37 @@ with st.container(border=True, key="card_setup"):
                                       placeholder="已使用部署設定的 Key，輸入可改用自己的" if preset else "")
                 if typed.strip() or preset:
                     keys[prov] = typed.strip() or preset
-            st.caption("至少填一家；兩家都有 Key 時，三個 Agent 可以混用不同服務商的模型。"
-                       f"部署時請在 Secrets 設定 {KEY_ENV['gemini']}／{KEY_ENV['openai']}。")
+            st.caption("至少填一家；有多家的 Key 時，三個 Agent 可以使用不同服務商的模型。"
+                       f"部署時請在 Secrets 設定 {'／'.join(KEY_ENV.values())}。")
 
-        options: list[tuple[str, str]] = []
+        models_by_prov: dict[str, list[str]] = {}
         failed = False
         for prov, key in keys.items():
             try:
-                options += [(prov, m) for m in fetch_models(prov, key)]
+                names = fetch_models(prov, key)
             except Exception as e:
                 failed = True
                 st.warning(str(e))
-        if options:
+                continue
+            if names:
+                models_by_prov[prov] = names
+        if models_by_prov:
             st.markdown("**指定三個 Agent 的模型**")
-            fmt = lambda o: f"{PROVIDER_LABEL[o[0]]}｜{o[1]}"  # noqa: E731
-            idx = default_index(options)
+            provs = list(models_by_prov)
             for agent, label in AGENT_PICK.items():
-                agent_models[agent] = st.selectbox(label, options, index=idx, format_func=fmt, key=f"model_{agent}")
+                if len(provs) == 1:  # 只有一家：直接選模型
+                    prov = provs[0]
+                    names = models_by_prov[prov]
+                    model = st.selectbox(f"{label}（{PROVIDER_LABEL[prov]}）", names,
+                                         index=default_index(prov, names), key=f"model_{agent}_{prov}")
+                else:  # 多家：先選服務商，再選該服務商的模型，避免清單過長
+                    c1, c2 = st.columns([1, 2])
+                    prov = c1.selectbox(label, provs, format_func=PROVIDER_LABEL.get, key=f"prov_{agent}")
+                    names = models_by_prov[prov]
+                    # key 含服務商，切換服務商時模型選單會換成新的清單與預設值
+                    model = c2.selectbox("模型", names, index=default_index(prov, names),
+                                         key=f"model_{agent}_{prov}")
+                agent_models[agent] = (prov, model)
             if st.button("重新查詢模型清單", type="tertiary"):
                 fetch_models.clear()
                 st.rerun()

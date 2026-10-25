@@ -28,8 +28,10 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-選「使用 AI 模型」並提供 API Key（介面輸入，或環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`、`.streamlit/secrets.toml`）後，
-系統會用這把 Key 向 Gemini／OpenAI 查詢可用的文字模型，讓你分別指定 Agent A、B、C 使用的模型（兩家都有 Key 時可混用）。
+選「使用 AI 模型」並提供 API Key（介面輸入，或環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`／`ANTHROPIC_API_KEY`、`.streamlit/secrets.toml`）後，
+系統會用這把 Key 向 Gemini／OpenAI／Claude 查詢可用的文字模型，讓你分別指定 Agent A、B、C 使用的模型。
+有兩家以上的 Key 時，每個 Agent 先選服務商、再選該服務商的模型，三個 Agent 可混用不同服務商。
+Claude 的 Opus 5.5、Opus 5、Sonnet 5.5、Fable 5.1 會開啟伺服器端拒答備援：模型基於安全理由拒答時，由 API 自動改用其他模型接手。
 報告表頭會列出每個 Agent 使用的模型。沒有 Key 時可選「離線示範」走完整流程並產出報表。
 `OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
 
