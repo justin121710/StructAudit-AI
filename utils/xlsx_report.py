@@ -394,7 +394,8 @@ def _a4_sheet(ws, m: ReportModel):
     for k, note in enumerate(m.notes, 5):
         a.para(f"7.{k}", f"系統紀錄：{note}")
     if m.clauses:
-        a.chap("附錄 A　引用規範條文（原文節錄）")
+        a.chap("附錄 A　引用規範條文（擷取文字）")
+        a.para("", "Excel 僅列擷取文字，規範公式可能拆成零散字元；原文版面（含公式、表格）請見 PDF 報告附錄 A。")
         for cl in m.clauses:
             a.para(cl.ref, cl.text[:500] + ("…" if len(cl.text) > 500 else ""))
     a.sign(m.sign_roles)

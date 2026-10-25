@@ -53,6 +53,8 @@ def test_spec_library_lookup_and_refs():
     assert lib.get("01", "表18.4.5.4").title.startswith("特殊抗彎矩構架柱之橫向鋼筋")
     assert lib.get("01", "式(19.2.2.1.b)").id == "19.2.2.1"  # 式號對應所在條文
     assert [x.id for x in lib.lookup("01", "18.4.3")] == ["18.4.3", "18.4.3.1", "18.4.3.2", "18.4.3.3"]
+    assert lib.get("01", "6.2.5.1").title.startswith("滿足下列(a)或(b)")  # 條號與內文分行排版者也能辨識
+    assert c.box and c.box[0][0] == c.pdf_page  # 條文在原文 PDF 上的範圍
     refs = lib.find_refs("土木401-112 §18.4.3.2；表 25.5.2.1；建築物耐震設計規範 §2.16.1；公路橋梁耐震設計規範 §5.3.3")
     assert refs == [("01", "18.4.3.2"), ("01", "表25.5.2.1"), ("02", "2.16.1"), ("12", "5.3.3")]
     assert lib.check_refs("§18.4.3.2、§99.9.9") == ["土木401-112 §99.9.9"]
@@ -92,3 +94,15 @@ def test_rcmd_catalog_and_case_changes():
     assert json.loads(rcmd.case_bytes(new))["app"] == "rc-section-designer"
     with pytest.raises(ValueError):
         rcmd.load_case(b'{"app": "other"}')
+
+
+def test_clause_image_from_original_spec_pdf():
+    import os
+
+    from utils.specs import clause_png
+
+    if not os.getenv("SPEC_PDF_DIR"):
+        pytest.skip("需要本機的 rc-member-designer（規範原文 PDF）")
+    png = clause_png("01", "6.2.5.1")
+    assert png and png[:4] == b"\x89PNG"
+    assert clause_png("01", "99.9.9") is None

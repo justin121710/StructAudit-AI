@@ -202,7 +202,9 @@ with left:
             idx = ReviewOrchestrator.roles_for(p)
             rows.append(f"| 第 {p} 輪 | " + " | ".join(names_for[idx[r]] for r in ROLES) + " |")
         st.markdown("\n".join(rows))
-        st.caption(f"約 {n_passes * (8 if lookup else 4) + 1} 次模型呼叫；每次都附上計算書 PDF 原檔。")
+        per_pass = 7 if lookup else 4  # 查閱×3（可關閉）＋ Round 1～3 ＋ 主任技師
+        st.caption(f"每輪 {per_pass} 次模型呼叫（{'3 次查閱規範＋' if lookup else ''}Round 1～3＋主任技師），"
+                   f"共約 {n_passes * per_pass + 1} 次（含綜合裁決）；每次都附上計算書 PDF 原檔。")
 
         uploaded = st.file_uploader("結構計算書（PDF，或 Excel／CSV 摘要表）", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
                                     key="calc_file")

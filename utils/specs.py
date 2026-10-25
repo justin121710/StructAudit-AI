@@ -5,18 +5,30 @@
 1. 計算書中引用的條號自動查出原文，先提供給 Agent；
 2. 每一回合開始前，Agent 可再依條號或關鍵字查閱（Agent 只能引用查得的原文）；
 3. Agent 輸出的條號逐一比對索引，查無者記入系統紀錄，提醒技師核對。
+
+規範的公式是方程式物件，文字擷取會拆成零散字元；報告附錄因此依索引記錄的範圍，從規範原文 PDF 直接裁切條文版面
+（clause_png，以 pdfium 排版）。原文 PDF 取自環境變數 SPEC_PDF_DIR（rc-member-designer 的根目錄），
+或第一次使用時從 GitHub 下載並快取於 ~/.cache/structaudit/specs/。
 """
 
 from __future__ import annotations
 
 import gzip
+import io
 import json
+import logging
+import os
 import re
+import threading
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
 INDEX_FILE = Path(__file__).resolve().parent.parent / "data" / "spec_index.json.gz"
+REPO_RAW = "https://raw.githubusercontent.com/justin121710/rc-member-designer/main/"
+CACHE_DIR = Path(os.getenv("STRUCTAUDIT_CACHE", Path.home() / ".cache" / "structaudit")) / "specs"
 DEFAULT_SPEC = "01"
 SCOPE_SPECS = {"bldg": ["01", "02", "03"], "bridge": ["01", "11", "12"], "water": ["01", "03", "22"]}
 CLAUSE_ID = r"\d{1,2}(?:\.\d{1,3}){1,5}"
@@ -32,6 +44,7 @@ class Clause:
     title: str
     text: str
     spec_short: str = ""
+    box: tuple = ()  # 條文本文在原文 PDF 上的範圍：((PDF 頁次, x0, y0, x1, y1), …)，座標原點在左上角（pt）
 
     @property
     def ref(self) -> str:
@@ -65,7 +78,7 @@ class SpecLibrary:
         for c in data["clauses"]:
             spec = self.specs[c["spec"]]
             cl = Clause(c["spec"], c["id"], c.get("page", ""), c.get("pdf_page", 0), c.get("title", ""), c["text"],
-                        spec["short"])
+                        spec["short"], tuple(tuple(b) for b in c.get("box", [])))
             self.clauses[cl.key] = cl
         # 別名比對（長者優先，避免「耐震設計規範」吃掉「公路橋梁耐震設計規範」）
         alias = [(a, code) for code, s in self.specs.items() for a in [s["short"], *s.get("aliases", [])]]
@@ -187,3 +200,74 @@ def format_clauses(clauses: list[Clause], max_chars: int = 1800) -> str:
 
 def scope_of(basis: str | None) -> list[str]:
     return SCOPE_SPECS.get(basis or "bldg", SCOPE_SPECS["bldg"])
+
+
+# ----------------------------------------------------------------------
+# 原文版面裁切（報告附錄）
+# ----------------------------------------------------------------------
+_PDF_LOCK = threading.Lock()  # pdfium 不可多執行緒同時使用
+
+
+def spec_pdf_path(code: str, download: bool = True) -> Path | None:
+    """規範原文 PDF 的本機路徑；SPEC_PDF_DIR 沒有時下載到快取。取得失敗回傳 None。"""
+    file = load_library().specs[code]["file"]
+    local = os.getenv("SPEC_PDF_DIR")
+    if local and (Path(local) / file).exists():
+        return Path(local) / file
+    cached = CACHE_DIR / Path(file).name
+    if cached.exists():
+        return cached
+    if not download or os.getenv("STRUCTAUDIT_OFFLINE"):
+        return None
+    try:
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(REPO_RAW + urllib.parse.quote(file), timeout=60) as r:  # noqa: S310
+            data = r.read()
+        if not data.startswith(b"%PDF"):
+            return None
+        tmp = cached.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(cached)
+        return cached
+    except OSError as e:
+        logging.getLogger(__name__).warning("規範原文 PDF 下載失敗（%s）：%s", file, e)
+        return None
+
+
+@lru_cache(maxsize=256)
+def clause_png(spec: str, cid: str, dpi: int = 150, download: bool = True) -> bytes | None:
+    """裁切規範原文中該條文本文的版面（灰階 PNG）；索引無範圍、取不到原文或排版失敗時回傳 None。"""
+    c = load_library().get(spec, cid)
+    if not c or not c.box:
+        return None
+    path = spec_pdf_path(c.spec, download)
+    if not path:
+        return None
+    try:
+        import pypdfium2 as pdfium
+        from PIL import Image
+
+        pad, scale, parts = 4.0, dpi / 72, []
+        with _PDF_LOCK:
+            doc = pdfium.PdfDocument(str(path))
+            try:
+                for pno, x0, y0, x1, y1 in c.box:
+                    page = doc[int(pno) - 1]
+                    w, h = page.get_size()
+                    # 上緣只留 1 pt：條文上方常緊接前一段的表格框線
+                    crop = (max(x0 - pad, 0), max(h - y1 - pad, 0), max(w - x1 - pad, 0), max(y0 - 1, 0))
+                    parts.append(page.render(scale=scale, crop=crop, grayscale=True).to_pil().convert("L"))
+            finally:
+                doc.close()
+        width = max(p.width for p in parts)
+        out = Image.new("L", (width, sum(p.height for p in parts) + 8 * (len(parts) - 1)), 255)
+        y = 0
+        for part in parts:
+            out.paste(part, (0, y))
+            y += part.height + 8
+        buf = io.BytesIO()
+        out.save(buf, "PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:  # 原文 PDF 損毀、pdfium 不可用等：附錄改顯示擷取文字
+        logging.getLogger(__name__).warning("規範條文裁切失敗（%s）：%s", c.ref, e)
+        return None

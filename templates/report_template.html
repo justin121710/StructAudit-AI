@@ -46,6 +46,8 @@ table.rp-kv td:nth-child(odd){font-weight:700;background:#f2f2f2;white-space:now
 .rp-eq code{font-family:"Times New Roman","Noto Serif CJK TC",serif;font-size:1.05em;white-space:pre-wrap}
 .rp-note{font-size:11px;color:#444;margin:4px 0 4px 14px;line-height:1.6}
 .rp-src{font-size:11px;color:#444;margin-top:2px}
+.rp-orig{margin:2px 0 10px 12px}
+.rp-orig img{display:block;height:auto}
 .rp-clause{font-size:10.5px;color:#222;white-space:pre-wrap;margin:2px 0 8px 12px;line-height:1.5}
 .no-break{break-inside:avoid;page-break-inside:avoid}
 .ng{font-weight:700}
@@ -193,8 +195,12 @@ a{color:#0F5F6B}
 
 {# ---------------- 附錄 ---------------- #}
 {% if m.clauses %}
-<div class="rp-h2">附錄 A　引用規範條文（原文節錄）</div>
-{% for c in m.clauses %}<div class="rp-h4">{{ c.ref }}（{{ c.where() }}）</div><div class="rp-clause">{{ c.text[:700] }}{% if c.text|length > 700 %}…{% endif %}</div>{% endfor %}
+<div class="rp-h2">附錄 A　引用規範條文（原文版面）</div>
+<div class="rp-note">以下條文直接裁切自規範原文 PDF（rc-member-designer specs/），公式與表格均為原文版面；僅列條文本文，解說請對照原文頁次。</div>
+{% for c in m.clauses %}<div class="no-break"><div class="rp-h4">{{ c.ref }}（{{ c.where() }}）</div>
+{% if images.get(c.key) %}<div class="rp-orig">{{ images[c.key] }}</div>
+{% else %}<div class="rp-clause">（無法取得規範原文 PDF，以下為擷取文字，公式可能不完整）
+{{ c.text[:700] }}{% if c.text|length > 700 %}…{% endif %}</div>{% endif %}</div>{% endfor %}
 {% endif %}
 
 <div class="rp-sign no-break"><table><thead><tr>{% for r in m.sign_roles %}<th>{{ r }}</th>{% endfor %}</tr></thead>

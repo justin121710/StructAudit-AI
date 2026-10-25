@@ -1,12 +1,15 @@
 """A4 審查報告產生器。
 
 版面沿用 rc-member-designer 計算書（見 utils/report_model.py），算式以 LaTeX 排版（utils/latex.py）。
+附錄的規範條文直接裁切規範原文 PDF 的版面（utils/specs.py clause_png），公式與表格與原文一致。
 優先以 Jinja2 HTML 範本 + WeasyPrint 排版（算式為向量 SVG）；若環境缺少 WeasyPrint 所需的 Pango 等系統函式庫，
 改用 ReportLab 依同一份報表資料模型產生相同章節結構的 PDF（算式為高解析 PNG）。
 """
 
 from __future__ import annotations
 
+import base64
+import io
 from pathlib import Path
 from xml.sax.saxutils import escape
 
@@ -16,6 +19,7 @@ from markupsafe import Markup
 from orchestrator import ReviewSession
 from utils import latex
 from utils.report_model import ReportModel, build_model, meta_rows, report_number
+from utils.specs import Clause, clause_png
 
 TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 TEMPLATE_NAME = "report_template.html"
@@ -36,11 +40,33 @@ def tex_html(formulas) -> Markup:
     return Markup("".join(out))
 
 
+CLAUSE_DPI = 150
+
+
+def clause_images(clauses: list[Clause]) -> dict[str, bytes]:
+    """附錄條文的原文版面（PNG）；取不到者不列入，由呼叫端改顯示擷取文字。"""
+    out = {}
+    for c in clauses:
+        png = clause_png(c.spec, c.id, CLAUSE_DPI)
+        if png:
+            out[c.key] = png
+    return out
+
+
+def _img_tag(png: bytes) -> Markup:
+    from PIL import Image
+
+    w = Image.open(io.BytesIO(png)).width * 72 / CLAUSE_DPI
+    return Markup(f'<img alt="" src="data:image/png;base64,{base64.b64encode(png).decode()}" '
+                  f'style="width:{w:.0f}pt;max-width:100%">')
+
+
 def render_html(session: ReviewSession) -> str:
     m = build_model(session)
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=select_autoescape(["html"]))
     env.filters["tex"] = tex_html
-    return env.get_template(TEMPLATE_NAME).render(m=m, meta_rows=meta_rows(m.meta))
+    images = {k: _img_tag(v) for k, v in clause_images(m.clauses).items()}
+    return env.get_template(TEMPLATE_NAME).render(m=m, meta_rows=meta_rows(m.meta), images=images)
 
 
 def generate_pdf(session: ReviewSession, engine: str = "auto") -> tuple[bytes, str]:
@@ -72,6 +98,8 @@ CJK_FONT_CANDIDATES = [
     "/Library/Fonts/Arial Unicode.ttf",
 ]
 PNG_DPI = 220
+APPENDIX_NOTE = ("以下條文直接裁切自規範原文 PDF（rc-member-designer specs/），公式與表格均為原文版面；"
+                 "僅列條文本文，解說請對照原文頁次。")
 
 
 def _register_cjk_font(pdfmetrics, UnicodeCIDFont) -> str:
@@ -281,10 +309,23 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
     story.append(P("本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。", note))
 
     if m.clauses:
-        story += heading2("附錄 A　引用規範條文（原文節錄）")
+        story += heading2("附錄 A　引用規範條文（原文版面）")
+        story.append(P(APPENDIX_NOTE, note))
+        images = clause_images(m.clauses)
         for c in m.clauses:
-            story.append(B(f"{c.ref}（{c.where()}）", h3))
-            story.append(P(c.text[:700] + ("…" if len(c.text) > 700 else ""), note))
+            block = [B(f"{c.ref}（{c.where()}）", h3)]
+            png = images.get(c.key)
+            if png:
+                w, h = ImageReader(io.BytesIO(png)).getSize()
+                w, h = w * 72 / CLAUSE_DPI, h * 72 / CLAUSE_DPI
+                k = min(1.0, width / w)
+                img = Image(io.BytesIO(png), width=w * k, height=h * k)
+                img.hAlign = "LEFT"
+                block.append(img)
+            else:
+                block.append(P("（無法取得規範原文 PDF，以下為擷取文字，公式可能不完整）\n"
+                               + c.text[:700] + ("…" if len(c.text) > 700 else ""), note))
+            story.append(KeepTogether(block))
 
     sign = Table([[B(r) for r in m.sign_roles], [""] * 3, [P("日期：")] * 3],
                  colWidths=[width / 3] * 3, rowHeights=[None, 16 * mm, None])

@@ -1,4 +1,5 @@
 import json
+import os
 from types import SimpleNamespace as NS
 
 import pytest
@@ -180,6 +181,8 @@ def test_pdf_generation(session, engine):
         pytest.importorskip("weasyprint")
     html = render_html(session)
     assert "C1" in html and 'class="tex"' in html and "rc-member-designer" in html  # 算式以 LaTeX 排成 SVG
+    if os.getenv("SPEC_PDF_DIR"):  # 附錄條文為原文版面裁切圖，不是零散的擷取文字
+        assert 'class="rp-orig"' in html and "無法取得規範原文" not in html
     pdf, used = generate_pdf(session, engine)
     assert used == engine and pdf.startswith(b"%PDF")
 

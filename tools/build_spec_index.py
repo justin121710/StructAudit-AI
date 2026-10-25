@@ -8,7 +8,8 @@
     pip install pymupdf
 
 條文以「條號開頭的行」切段（例如「18.4.4.1 柱之縱向鋼筋……」、「表 18.4.5.4 ……」），
-每段保留條號、規範頁碼（如 18-61）、PDF 頁次與全文（含其後之解說）。
+每段保留條號、規範頁碼（如 18-61）、PDF 頁次、全文（含其後之解說），以及條文本文在 PDF 上的範圍
+（報告附錄據此裁切原文版面；規範的公式是方程式物件，文字擷取會拆成零散字元，只有原文版面能正確呈現）。
 """
 
 from __future__ import annotations
@@ -86,12 +87,36 @@ def load_pdf(spec_file: str, repo: Path | None) -> bytes:
         return r.read()
 
 
-def chunk_pages(pages: list[str]) -> list[dict]:
+def page_lines(page) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """PyMuPDF 頁面 → [(文字, (x0, y0, x1, y1))]，與 get_text() 相同的行序。"""
+    out = []
+    for b in page.get_text("dict")["blocks"]:
+        if b.get("type") != 0:
+            continue
+        for ln in b["lines"]:
+            text = normalize("".join(s["text"] for s in ln["spans"]).encode("utf-8", "replace").decode("utf-8"))
+            out.append((text, tuple(round(v, 1) for v in ln["bbox"])))
+    # 同一基線、左右相鄰的行合併（例如「6.2.5.1」與其後的條文、表格同列各欄），避免條號與內文被拆開
+    merged: list[tuple[str, tuple]] = []
+    for text, bb in out:
+        if merged:
+            ptext, pb = merged[-1]
+            same_row = abs((bb[1] + bb[3]) / 2 - (pb[1] + pb[3]) / 2) < 2.5 and bb[0] >= pb[2] - 1
+            if same_row and text.strip():
+                merged[-1] = (ptext.rstrip() + " " + text.strip(), (pb[0], min(pb[1], bb[1]), bb[2], max(pb[3], bb[3])))
+                continue
+        merged.append((text, bb))
+    return merged
+
+
+def chunk_pages(pages: list[tuple[list, float]]) -> list[dict]:
+    """pages：[(page_lines, 頁高)]。每段除全文外，另記條文本文（不含解說）在 PDF 上的範圍 box：
+    [[PDF 頁次, x0, y0, x1, y1], …]（最多兩頁），供報告附錄直接裁切原文版面（公式、表格不會被拆散）。"""
     chunks: list[dict] = []
     cur: dict | None = None
     label = ""
-    for pno, text in enumerate(pages, 1):
-        for line in text.splitlines():
+    for pno, (lines, height) in enumerate(pages, 1):
+        for line, (x0, y0, x1, y1) in lines:
             m = PAGE_LABEL.match(line)
             if m:
                 label = f"{m.group(1)}-{m.group(2)}"
@@ -102,16 +127,26 @@ def chunk_pages(pages: list[str]) -> list[dict]:
                 cid = (m.group(1) + m.group(2)) if m else t.group(1) + t.group(2)
                 title = (m.group(3) if m else t.group(3)).strip()
                 cur = {"id": cid, "page": label, "pdf_page": pno, "title": re.split(r"[。：:]", title)[0][:40],
-                       "lines": [line.strip()]}
+                       "lines": [line.strip()], "box": {}, "body": True}
                 chunks.append(cur)
             elif cur is not None and line.strip():
                 cur["lines"].append(line.strip())
+                if line.strip().startswith("解說"):
+                    cur["body"] = False
+            else:
+                continue
+            if not cur["body"] or y1 < height * 0.06 or y0 > height * 0.94:  # 解說、頁首頁尾不納入裁切範圍
+                continue
+            b = cur["box"].get(pno)
+            cur["box"][pno] = [min(b[0], x0), min(b[1], y0), max(b[2], x1), max(b[3], y1)] if b else [x0, y0, x1, y1]
     out: dict[str, dict] = {}
     for c in chunks:
         text = "\n".join(c.pop("lines"))
         if len(text) > MAX_CHARS:
             text = text[:MAX_CHARS] + "…（以下省略，請對照原文）"
         c["text"] = text
+        c["box"] = [[pg, *bb] for pg, bb in sorted(c["box"].items())][:2]
+        c.pop("body")
         prev = out.get(c["id"])
         if prev is None or len(text) > len(prev["text"]):  # 目錄頁的同條號段落較短，保留正文
             out[c["id"]] = c
@@ -125,7 +160,7 @@ def main() -> None:
     specs, clauses = [], []
     for code, file, name, short, aliases, scope in SPECS:
         doc = fitz.open(stream=load_pdf(file, repo), filetype="pdf")
-        pages = [normalize(p.get_text().encode("utf-8", "replace").decode("utf-8")) for p in doc]
+        pages = [(page_lines(p), p.rect.height) for p in doc]
         items = chunk_pages(pages)
         specs.append({"code": code, "file": file, "name": name, "short": short, "aliases": aliases,
                       "scope": scope, "pages": len(pages), "clauses": len(items)})
