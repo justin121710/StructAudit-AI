@@ -21,7 +21,12 @@ from utils.report_model import build_model, report_number
 from utils.xlsx_report import generate_xlsx
 
 SAMPLE_FILE = Path(__file__).parent / "examples" / "sample_structure.xlsx"
-KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
+KEY_ENV = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}  # 建議的 Secrets 名稱
+# Secrets 名稱常見寫法（比對時忽略大小寫與底線），例如 OPEN_AI_KEY、openai_api_key 都能讀到
+KEY_ALIASES = {
+    "gemini": {"GEMINIAPIKEY", "GEMINIKEY", "GOOGLEAPIKEY"},
+    "openai": {"OPENAIAPIKEY", "OPENAIKEY"},
+}
 MODE_AI, MODE_DEMO = "使用 AI 模型", "離線示範（不呼叫 API）"
 AGENT_PICK = {"A": "Agent A｜原設計工程師", "B": "Agent B｜外部審查專家", "C": "Agent C｜主任檢核技師"}
 # 預設模型：依序取第一個查得到的；都沒有時取名稱含 pro 的，再不然取清單第一個
@@ -62,11 +67,24 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 
-def secret(name: str) -> str:
+def _norm_key_name(name: str) -> str:
+    return name.upper().replace("_", "").replace("-", "")
+
+
+def secret_key(provider: str) -> str:
+    """從 Streamlit Secrets 或環境變數取得 API Key；名稱寫法不同（如 OPEN_AI_KEY）也能對上。"""
+    aliases = KEY_ALIASES[provider]
     try:
-        return st.secrets.get(name, "") or os.getenv(name, "")
+        names = list(st.secrets.keys())
     except Exception:  # 沒有 secrets.toml
-        return os.getenv(name, "")
+        names = []
+    for name in names:
+        if _norm_key_name(name) in aliases and isinstance(st.secrets[name], str) and st.secrets[name].strip():
+            return st.secrets[name].strip()
+    for name, value in os.environ.items():
+        if _norm_key_name(name) in aliases and value.strip():
+            return value.strip()
+    return ""
 
 
 def dialogue_header() -> None:
@@ -110,22 +128,23 @@ def default_index(options: list[tuple[str, str]]) -> int:
     return next((i for i, m in enumerate(names) if "pro" in m), 0)
 
 
-has_key = any(secret(k) for k in KEY_ENV.values())
+has_key = any(secret_key(p) for p in KEY_ENV)
 agent_models: dict[str, tuple[str, str]] = {}  # A／B／C -> (provider, model)
 keys: dict[str, str] = {}
 with st.container(border=True, key="card_setup"):
     mode = st.radio("審查方式", [MODE_AI, MODE_DEMO], index=0 if has_key else 1, horizontal=True)
     if mode == MODE_AI:
         with st.expander("API Key", expanded=not has_key):
-            for prov, env in KEY_ENV.items():
+            for prov in KEY_ENV:
                 label = PROVIDER_LABEL[prov]
                 # 部署端設定的 Key 只留在伺服器，不放進輸入框（否則會傳到使用者的瀏覽器）
-                preset = secret(env)
+                preset = secret_key(prov)
                 typed = st.text_input(f"{label} API Key", type="password",
                                       placeholder="已使用部署設定的 Key，輸入可改用自己的" if preset else "")
-                if typed or preset:
-                    keys[prov] = typed or preset
-            st.caption("至少填一家；兩家都有 Key 時，三個 Agent 可以混用不同服務商的模型。")
+                if typed.strip() or preset:
+                    keys[prov] = typed.strip() or preset
+            st.caption("至少填一家；兩家都有 Key 時，三個 Agent 可以混用不同服務商的模型。"
+                       f"部署時請在 Secrets 設定 {KEY_ENV['gemini']}／{KEY_ENV['openai']}。")
 
         options: list[tuple[str, str]] = []
         failed = False

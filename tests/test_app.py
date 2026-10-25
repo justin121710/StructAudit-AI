@@ -57,3 +57,25 @@ def test_pick_three_models_with_api_key(monkeypatch):
     assert not at.exception
     s = at.session_state["review"]
     assert s.agent_models == {"A": "mock / gemini-2.5-flash", "B": "mock / gemini-2.5-pro", "C": "mock / gemini-2.0-flash"}
+
+
+def test_secret_name_variants_are_recognised(monkeypatch):
+    """Secrets 名稱寫成 OPEN_AI_KEY（含空白）也要讀得到。"""
+    import agents.llm_client as llm
+
+    for key in ("GEMINI_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    seen = {}
+
+    def fake_list(provider, api_key):
+        seen[provider] = api_key
+        return ["gpt-4.1", "gpt-4o"]
+
+    monkeypatch.setattr(llm, "list_models", fake_list)
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=180)
+    at.secrets["OPEN_AI_KEY"] = "  sk-openai-test \n"
+    at.run()
+    assert not at.exception
+    assert seen == {"openai": "sk-openai-test"}
+    picks = [s for s in at.selectbox if s.key and s.key.startswith("model_")]
+    assert len(picks) == 3 and picks[0].value == ("openai", "gpt-4.1")

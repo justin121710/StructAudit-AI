@@ -77,6 +77,8 @@ Streamlit Community Cloud 是 Streamlit 官方的免費託管服務，直接從 
 | PDF 是簡化版版面 | Pango 未安裝成功，確認 `packages.txt` 內容並看建置記錄中的 apt 安裝訊息 |
 | PDF 中文變成方框 | 中文字型未安裝成功，確認 `packages.txt` 有 `fonts-noto-cjk`、`fonts-wqy-zenhei` |
 | 打開網址顯示 App 在休眠 | 免費方案的 App 一段時間沒人使用會休眠，按畫面上的喚醒按鈕即可，約需數十秒 |
+| 某一家（例如 OpenAI）載不出模型 | Secrets 名稱建議用 `OPENAI_API_KEY`／`GEMINI_API_KEY`（`OPEN_AI_KEY` 等常見寫法也能辨識）；確認 Key 前後沒有多餘字元，且帳號已開通付費額度 |
+| 顯示「沒有讀取模型清單的權限」 | OpenAI 限制權限的 Key 需在後台開啟 Models 讀取權限，或改用一般權限的 Key |
 | 審查失敗並顯示 API 錯誤 | 檢查 Secrets 中的 Key 是否正確、帳號是否有額度，以及模型名稱是否可用 |
 
 ## 其他選擇：GitHub Codespaces（只給自己用）

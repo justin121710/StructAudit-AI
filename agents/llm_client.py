@@ -425,6 +425,8 @@ def list_models(provider: str, api_key: str) -> list[str]:
         text = str(e)
         if any(k in text for k in ("API key not valid", "API_KEY_INVALID", "Incorrect API key", "401")):
             raise LLMError(f"{label} API Key 無效，請確認是否複製完整、是否已啟用。") from e
+        if "403" in text or "insufficient permissions" in text.lower():
+            raise LLMError(f"{label} API Key 沒有讀取模型清單的權限；若是限制權限的 Key，請在後台開啟 Models 的讀取權限。") from e
         raise LLMError(f"{label} 查詢模型失敗：{text[:200]}") from e
     raise LLMError(f"未知的 provider：{provider}")
 
