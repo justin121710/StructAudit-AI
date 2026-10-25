@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>結構計算書審查報告｜{{ info.get('案名', '') }}</title>
+<style>
+  @page {
+    size: A4;
+    margin: 22mm 18mm 20mm 18mm;
+    font-family: "Noto Sans CJK TC","Noto Sans TC","Microsoft JhengHei","PingFang TC","WenQuanYi Zen Hei",sans-serif;
+    @top-left { content: "結構計算書 AI 雙重詰問審查報告"; font-size: 8pt; color: #6b7280; }
+    @top-right { content: "{{ report_no }}"; font-size: 8pt; color: #6b7280; }
+    @bottom-center { content: "第 " counter(page) " 頁／共 " counter(pages) " 頁"; font-size: 8pt; color: #6b7280; }
+    @bottom-right { content: "本報告由 AI 輔助產生，須經執業結構技師簽證後始生效力"; font-size: 7pt; color: #9ca3af; }
+  }
+  @page:first { @top-left { content: none; } @top-right { content: none; } }
+
+  :root { --ink:#111827; --muted:#6b7280; --line:#d1d5db; --head:#1f3a5f;
+          --high:#b91c1c; --high-bg:#fef2f2; --med:#b45309; --med-bg:#fffbeb;
+          --pass:#15803d; --pass-bg:#f0fdf4; }
+  * { box-sizing: border-box; }
+  body { font-family: "Noto Sans CJK TC","Noto Sans TC","Microsoft JhengHei","PingFang TC",
+         "WenQuanYi Zen Hei",sans-serif; color: var(--ink); font-size: 9.5pt; line-height: 1.55; }
+  h1 { font-size: 20pt; margin: 0 0 4mm; color: var(--head); letter-spacing: 1px; }
+  h2 { font-size: 13pt; color: var(--head); border-bottom: 2px solid var(--head);
+       padding-bottom: 1.5mm; margin: 8mm 0 3mm; page-break-after: avoid; }
+  h3 { font-size: 10.5pt; margin: 4mm 0 2mm; page-break-after: avoid; }
+  table { width: 100%; border-collapse: collapse; margin: 2mm 0 4mm; table-layout: fixed; }
+  th, td { border: 0.6pt solid var(--line); padding: 1.6mm 2mm; vertical-align: top; text-align: left; }
+  th { background: #eef2f7; font-weight: 600; white-space: nowrap; }
+  tr { page-break-inside: avoid; }
+  .muted { color: var(--muted); }
+  .cover { border: 1.2pt solid var(--head); padding: 8mm; margin-bottom: 6mm; }
+  .cover td, .cover th { border: none; border-bottom: 0.5pt solid var(--line); }
+  .cover table { table-layout: auto; }
+  .cover th { background: none; width: 28mm; color: var(--muted); font-weight: 400; }
+  .verdict { margin: 4mm 0; padding: 4mm 5mm; border-left: 3mm solid; font-size: 11pt; }
+  .verdict b { font-size: 14pt; margin-right: 3mm; }
+  .v-退回補正 { border-color: var(--high); background: var(--high-bg); }
+  .v-修正後同意 { border-color: var(--med); background: var(--med-bg); }
+  .v-同意備查 { border-color: var(--pass); background: var(--pass-bg); }
+  .stats { display: flex; gap: 3mm; margin: 3mm 0; }
+  .stat { flex: 1; border: 0.6pt solid var(--line); padding: 2.5mm; text-align: center; }
+  .stat .n { font-size: 16pt; font-weight: 700; display: block; }
+  .tag { display: inline-block; padding: 0.3mm 2mm; border-radius: 1mm; font-size: 8pt;
+         font-weight: 600; white-space: nowrap; }
+  .tag-High { color: var(--high); background: var(--high-bg); border: 0.5pt solid var(--high); }
+  .tag-Medium { color: var(--med); background: var(--med-bg); border: 0.5pt solid var(--med); }
+  .tag-Pass { color: var(--pass); background: var(--pass-bg); border: 0.5pt solid var(--pass); }
+  .tag-Info { color: var(--muted); border: 0.5pt solid var(--line); }
+  .thread { border: 0.6pt solid var(--line); margin: 3mm 0 5mm; page-break-inside: avoid; }
+  .thread .hd { background: #eef2f7; padding: 2mm 3mm; font-weight: 600; }
+  .turn { padding: 2mm 3mm; border-top: 0.5pt dashed var(--line); }
+  .who { font-weight: 600; font-size: 8.5pt; color: var(--head); }
+  .formula { font-family: "DejaVu Sans Mono", monospace; background: #f3f4f6; padding: 1mm 2mm;
+             display: block; margin: 1mm 0; font-size: 8.5pt; white-space: pre-wrap; }
+  .kv { font-size: 8.5pt; color: var(--muted); }
+  .sign { margin-top: 10mm; }
+  .sign td { height: 18mm; }
+  .page-break { page-break-before: always; }
+</style>
+</head>
+<body>
+
+<h1>結構計算書審查報告</h1>
+<div class="cover">
+  <table>
+    <tr><th>報告編號</th><td>{{ report_no }}</td></tr>
+    {% for k, v in info.items() if v %}
+    <tr><th>{{ k }}</th><td>{{ v }}</td></tr>
+    {% endfor %}
+    <tr><th>審查日期</th><td>{{ session.started_at }}</td></tr>
+    <tr><th>審查方式</th><td>AI 雙重詰問審查（三回合）＋主任檢核技師彙整</td></tr>
+    <tr><th>語言模型</th><td>{{ session.provider }} / {{ session.model }}</td></tr>
+  </table>
+</div>
+
+<h2>一、審查結論</h2>
+<div class="verdict v-{{ chief.overall_conclusion.value }}">
+  <b>{{ chief.overall_conclusion.value }}</b>
+</div>
+<p>{{ chief.executive_summary }}</p>
+<div class="stats">
+  <div class="stat"><span class="n" style="color:var(--high)">{{ chief.major_doubts|length }}</span>重大疑義</div>
+  <div class="stat"><span class="n" style="color:var(--med)">{{ chief.pending_review_items|length }}</span>待複核項目</div>
+  <div class="stat"><span class="n" style="color:var(--pass)">{{ chief.no_concern_items|length }}</span>無虞項目</div>
+</div>
+
+{% macro item_table(items, empty) %}
+  {% if items %}
+  <table>
+    <tr><th style="width:14mm">編號</th><th style="width:26mm">項目</th><th>檢核結論</th><th style="width:36mm">判定依據</th><th style="width:36mm">處理意見</th></tr>
+    {% for it in items %}
+    <tr>
+      <td>{{ it.issue_id }}<br><span class="tag tag-{{ it.risk_level.value }}">{{ it.risk_level.value }}</span></td>
+      <td>{{ it.title }}</td><td>{{ it.finding }}</td><td>{{ it.basis }}</td><td>{{ it.recommendation }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<p class="muted">{{ empty }}</p>{% endif %}
+{% endmacro %}
+
+<h3>（一）重大疑義</h3>
+{{ item_table(chief.major_doubts, "無。") }}
+<h3>（二）待複核項目</h3>
+{{ item_table(chief.pending_review_items, "無。") }}
+<h3>（三）無虞項目</h3>
+{{ item_table(chief.no_concern_items, "無。") }}
+
+{% if chief.debate_observations %}
+<h3>（四）主任檢核技師觀察</h3>
+<p>{{ chief.debate_observations }}</p>
+{% endif %}
+
+<h2>二、規則式初篩結果</h2>
+{% if session.findings %}
+<table>
+  <tr><th style="width:16mm">等級</th><th style="width:28mm">工作表</th><th>項目</th><th>說明</th><th style="width:42mm">參考規範</th></tr>
+  {% for f in session.findings %}
+  <tr><td><span class="tag tag-{{ f.level }}">{{ f.level }}</span></td><td>{{ f.sheet }}</td><td>{{ f.item }}</td><td>{{ f.detail }}</td><td>{{ f.reference }}</td></tr>
+  {% endfor %}
+</table>
+{% else %}<p class="muted">未發現超出預設門檻之數值。</p>{% endif %}
+
+<h2 class="page-break">三、詰問審查歷程</h2>
+<p class="muted">Round 1 初審質疑：{{ session.round1.summary }}</p>
+{% for t in threads %}
+{% set i, r, v = t.issue, t.response, t.verdict %}
+<div class="thread">
+  <div class="hd">{{ i.issue_id }}｜{{ i.title }} <span class="muted">（{{ i.category }}）</span>
+    {% if v %}<span class="tag tag-{{ v.risk_level.value }}" style="float:right">{{ v.decision.value }}・{{ v.risk_level.value }}</span>{% endif %}
+  </div>
+  <div class="turn">
+    <div class="who">Round 1｜外部審查專家 質疑</div>
+    {{ i.challenge }}
+    <span class="formula">{{ i.formula }}</span>
+    <div class="kv">引用數據：{{ i.cited_data }}｜依據：{{ i.code_reference }}</div>
+  </div>
+  {% if r %}
+  <div class="turn">
+    <div class="who">Round 2｜原設計工程師 回覆（{{ r.stance.value }}）</div>
+    {{ r.response }}
+    {% if r.calculation %}<span class="formula">{{ r.calculation }}</span>{% endif %}
+    {% if r.proposed_action %}<div>修正方案：{{ r.proposed_action }}</div>{% endif %}
+    <div class="kv">數據出處：{{ r.data_source }}｜規範依據：{{ r.code_reference }}</div>
+  </div>
+  {% endif %}
+  {% if v %}
+  <div class="turn">
+    <div class="who">Round 3｜外部審查專家 終審（{{ v.decision.value }}）</div>
+    {{ v.rationale }}
+    {% if v.required_action %}<div class="kv">應辦事項：{{ v.required_action }}</div>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if session.notes %}
+<h2>四、系統紀錄</h2>
+<ul>{% for n in session.notes %}<li class="muted">{{ n }}</li>{% endfor %}</ul>
+{% endif %}
+
+<table class="sign">
+  <tr><th style="width:33%">審查（AI 輔助）</th><th style="width:33%">複核技師</th><th>主任技師簽證</th></tr>
+  <tr><td></td><td></td><td></td></tr>
+</table>
+<p class="kv">聲明：本報告由大型語言模型輔助產生，內容可能有誤，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。</p>
+
+</body>
+</html>
