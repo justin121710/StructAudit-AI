@@ -361,3 +361,31 @@ def test_cost_uses_model_prices_and_fx():
     assert default_price("gemini-4-argon", date(2026, 12, 1)).input == 4.0  # 優惠期後標準價
     custom = summarize(usage[:1], {"claude-opus-5-5": Price(1, 1, 1, 1)}, fx=30)
     assert custom.usd == pytest.approx(2.1)  # 使用者自訂單價優先
+
+
+def test_review_runs_on_pdf_without_text_layer(scanned_pdf):
+    """掃描檔沒有文字：PDF 原檔照樣附給模型，表頭專案資料由 Agent 在 Round 1 從頁面判讀補上。"""
+    cb = read_calcbook(scanned_pdf, filename="掃描計算書.pdf")
+    r1 = {"summary": "s", "project_facts": [{"item": "構件", "value": "C1", "source": "第 1 頁"}],
+          "issues": [issue(1, "低風險")]}
+    resp = {"responses": [{"issue_id": "Q1", "stance": "計算推導抗辯", "response": "r", "data_source": "p1"}]}
+    verdict = {"verdicts": [{"issue_id": "Q1", "decision": "接受", "risk_level": "低風險", "rationale": "ok"}]}
+    item = {"issue_id": "Q1", "title": "t", "risk_level": "低風險", "finding": "f", "basis": "b", "recommendation": "r"}
+    chief = {"overall_conclusion": "同意備查", "executive_summary": "e", "no_concern_items": [item]}
+    final = {"overall_conclusion": "同意備查", "executive_summary": "e",
+             "items": [{"title": "t", "source_ids": ["P1-Q1"], "risk_level": "低風險", "finding": "f"}]}
+    lookup = {"clauses": [], "keywords": []}
+    sent = []
+
+    class Recording(ScriptedClient):
+        def _complete(self, system, user, temperature, attachments):
+            sent.append(attachments)
+            return super()._complete(system, user, temperature, attachments)
+
+    client = Recording([json.dumps(x, ensure_ascii=False)
+                        for x in (lookup, r1, lookup, resp, lookup, verdict, chief, final)])
+    s = ReviewOrchestrator(client, passes=1).run(cb)
+    assert s.final.overall_conclusion == S.OverallConclusion.APPROVED
+    assert s.project_info == {"構件": "C1"}  # 由 Agent 從頁面判讀
+    assert all(a and a[0].data == scanned_pdf for a in sent)  # 每次呼叫都附上 PDF 原檔
+    assert "沒有文字層" in client.prompts[1]

@@ -33,6 +33,7 @@ KEY_ALIASES = {
     "openai": {"OPENAIAPIKEY", "OPENAIKEY"},
     "claude": {"ANTHROPICAPIKEY", "ANTHROPICKEY", "CLAUDEAPIKEY", "CLAUDEKEY"},
 }
+PDF_WARN_MB = 15  # 計算書 PDF 超過此大小時提醒（附件以 base64 傳送，約增大 1/3；Gemini 單次請求上限約 20 MB）
 MODE_AI, MODE_DEMO = "使用 AI 模型", "離線示範（不呼叫 API）"
 SLOT_PROVIDER = ["gemini", "claude", "openai"]  # 三個模型槽位的預設服務商（第 1 輪依序擔任 A／B／C）
 ROLE_SHORT = {"A": "設計", "B": "外審", "C": "主任技師"}
@@ -345,21 +346,37 @@ with left:
     except ValueError as e:
         st.error(str(e))
 
+    if calc is not None and not calc.has_text:
+        st.warning(
+            f"「{calc.filename}」沒有文字層（{calc.n_pages} 頁皆為影像，可能是掃描檔或以影像方式列印）。"
+            "AI 模型仍會直接讀取 PDF 頁面影像進行審查，表頭專案資料改由 Agent 從頁面判讀；"
+            "但計算書引用的條號無法自動查出原文（改由 Agent 自行查閱），離線示範也無法使用。\n\n"
+            "若是 RC 構件設計工具的計算書，建議重新輸出：按「列印 / 存成 PDF」，目的地選「另存為 PDF」"
+            "（不要選「Microsoft Print to PDF」或以圖片列印），可保留文字層，審查較準確，檔案也較小。",
+            icon=":material/image:")
+    if calc is not None and calc.pdf and len(calc.pdf) > PDF_WARN_MB * 1e6:
+        st.warning(f"計算書 PDF 為 {len(calc.pdf) / 1e6:.1f} MB。每次模型呼叫都會附上原檔，"
+                   f"超過約 {PDF_WARN_MB} MB 時部分服務商可能拒收；建議重新輸出較小的 PDF 或分冊審查。",
+                   icon=":material/warning:")
+
     project_info: dict[str, str] = {}
     if calc:
         with st.expander(f"專案資料（取自計算書：{calc.filename}，{calc.n_pages or '—'} 頁）"):
             if not calc.facts:
-                st.caption("計算書表頭未辨識到專案資料；審查時由 Agent 從計算書內容補充。")
+                st.caption("計算書表頭未辨識到專案資料；審查時由 Agent 從計算書頁面判讀後補充。")
             for k, v in calc.facts.items():
                 project_info[k] = st.text_input(k, v, key=f"fact_{calc.sha256[:10]}_{k}")
             if case:
                 st.caption(f"案件檔：{case_name}（{rcmd.MODULE_LABEL[rcmd.case_module(case)]}模組）")
 
     need_models = mode == MODE_AI and len(slots) < 3
-    st.button("開始審查", type="primary", width="stretch", disabled=calc is None or need_models, key="run",
-              on_click=_start)
+    demo_no_text = mode == MODE_DEMO and calc is not None and not calc.has_text
+    st.button("開始審查", type="primary", width="stretch", disabled=calc is None or need_models or demo_no_text,
+              key="run", on_click=_start)
     if need_models:
         st.caption("請輸入 API Key 並選好三個模型，或改用離線示範。")
+    if demo_no_text:
+        st.caption("離線示範需要 PDF 的文字層；此計算書請改用 AI 模型審查。")
 
 # ================================================================ 右側：審查輸出
 session: ReviewSession | None = st.session_state.get("review")

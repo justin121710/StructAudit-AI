@@ -66,9 +66,17 @@ class CalcBook:
     def from_rcmd(self) -> bool:
         return "程式版本／雜湊" in self.facts and "計算書" in self.title
 
+    @property
+    def has_text(self) -> bool:
+        """PDF 是否有文字層；沒有時（掃描影像等）審查改由模型直接判讀附件 PDF 的頁面影像。"""
+        return self.kind != "pdf" or any(p.strip() for p in self.pages)
+
     def text(self) -> str:
         if self.kind == "table" and self.table is not None:
             return self.table.to_prompt_text()
+        if not self.has_text:
+            return (f"（此 PDF 共 {self.n_pages} 頁，沒有文字層，可能是掃描檔或以影像方式列印。"
+                    "請直接判讀附件 PDF 的頁面影像，並從第 1 頁表頭擷取專案資料。）")
         return "\n".join(f"<<第 {n} 頁>>\n{t}" for n, t in enumerate(self.pages, 1))
 
     def prompt_text(self, max_chars: int = MAX_PROMPT_CHARS) -> str:
@@ -89,12 +97,42 @@ def clean_text(t: str) -> str:
     return re.sub(r"[ \t]+\n", "\n", t)
 
 
-def extract_pages(data: bytes) -> list[str]:
+def _pypdf_pages(data: bytes) -> list[str]:
     import pypdf
 
     logging.getLogger("pypdf").setLevel(logging.ERROR)  # 部分 PDF 的字型表會產生大量無害警告
     reader = pypdf.PdfReader(io.BytesIO(data))
-    return [clean_text(p.extract_text() or "") for p in reader.pages]
+    if reader.is_encrypted:
+        reader.decrypt("")  # 只設權限密碼（可開啟、限制列印／複製）的 PDF
+    return [p.extract_text() or "" for p in reader.pages]
+
+
+def _pdfium_pages(data: bytes) -> list[str]:
+    import pypdfium2 as pdfium
+
+    doc = pdfium.PdfDocument(data)
+    try:
+        return [doc[i].get_textpage().get_text_range() for i in range(len(doc))]
+    finally:
+        doc.close()
+
+
+def extract_pages(data: bytes) -> list[str]:
+    """擷取每頁文字：先用 pypdf，字數過少或失敗時改用 pdfium，取擷取到較多文字者。
+    兩者都沒有文字時（掃描影像、以影像方式列印），回傳空字串清單，由模型直接判讀 PDF 頁面影像。"""
+    best: list[str] = []
+    for reader in (_pypdf_pages, _pdfium_pages):
+        try:
+            pages = reader(data)
+        except Exception:  # 損毀、加密等：交給下一個擷取器
+            continue
+        if sum(len(p.strip()) for p in pages) > sum(len(p.strip()) for p in best) or not best:
+            best = pages
+        if sum(len(p.strip()) for p in best) >= 50 * max(len(best), 1):
+            break
+    if not best:
+        raise ValueError("無法開啟此 PDF（檔案損毀或需要開啟密碼）")
+    return [clean_text(p) for p in best]
 
 
 def header_facts(first_page: str) -> tuple[str, dict[str, str]]:
@@ -146,9 +184,7 @@ def read_calcbook(file: str | Path | bytes, filename: str | None = None) -> Calc
         raise ValueError("bytes 輸入需提供 filename 以判斷格式")
     sha = hashlib.sha256(data).hexdigest()
     if Path(filename).suffix.lower() == ".pdf":
-        pages = extract_pages(data)
-        if not any(p.strip() for p in pages):
-            raise ValueError("PDF 沒有可擷取的文字（可能是掃描影像）；仍可由支援 PDF 的模型直接判讀，但離線示範無法使用")
+        pages = extract_pages(data)  # 沒有文字層時為空字串清單：仍可審查，模型直接判讀 PDF 頁面影像
         title, facts = header_facts(pages[0] if pages else "")
         return CalcBook(filename, sha, "pdf", title=title, pages=pages, facts=facts, pdf=data)
     summary = parse_structural_file(data, filename=filename)

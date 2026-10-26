@@ -33,6 +33,20 @@ def test_calc_text_has_page_markers_and_no_cjk_gaps(calc):
     assert "柱 斷 面" not in text  # pypdf 在中文字間插入的空白已移除
 
 
+def test_pdf_without_text_layer_is_still_reviewable(scanned_pdf):
+    cb = read_calcbook(scanned_pdf, filename="掃描計算書.pdf")
+    assert cb.kind == "pdf" and cb.n_pages == 3 and not cb.has_text and cb.pdf == scanned_pdf
+    assert cb.facts == {} and "沒有文字層" in cb.prompt_text() and "頁面影像" in cb.text()
+
+
+def test_pdfium_fallback_when_pypdf_finds_no_text(monkeypatch):
+    import utils.calcbook as C
+
+    monkeypatch.setattr(C, "_pypdf_pages", lambda data: ["", ""])  # 模擬 pypdf 讀不出文字
+    pages = C.extract_pages(open(SAMPLE_PDF, "rb").read())
+    assert len(pages) == 16 and "不合格項目" in "".join(pages)
+
+
 def test_generic_header_keys():
     title, facts = header_facts("第 1 頁\n某某大樓結構計算書\n工程名稱：示範大樓\n設計單位：某事務所\n1. 設計概要")
     assert title == "某某大樓結構計算書" and facts == {"工程名稱": "示範大樓", "設計單位": "某事務所"}

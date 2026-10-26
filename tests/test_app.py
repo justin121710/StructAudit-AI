@@ -95,3 +95,23 @@ def test_multiple_providers_default_to_flagships(monkeypatch):
     models = {s.key: s.value for s in at.selectbox if s.key and s.key.startswith("model_")}
     assert models == {"model_0_gemini": "gemini-4-argon", "model_1_claude": "claude-opus-5-5",
                       "model_2_openai": "gpt-6.1-sol"}
+
+
+def test_pdf_without_text_layer_warns_but_allows_ai_review(monkeypatch, scanned_pdf):
+    import agents.llm_client as llm
+
+    for key in KEYS:
+        monkeypatch.delenv(key, raising=False)
+    at = streamlit_testing.AppTest.from_file(str(APP), default_timeout=300)
+    at.run()
+    at.checkbox(key="use_sample").uncheck()
+    at.file_uploader(key="calc_file").set_value(("掃描計算書.pdf", scanned_pdf, "application/pdf"))
+    at.run()
+    assert not at.exception and not at.error  # 不再當成讀取失敗
+    assert any("沒有文字層" in w.value for w in at.warning)
+    assert at.button(key="run").disabled  # 離線示範需要文字層
+
+    monkeypatch.setenv("GEMINI_API_KEY", "g-key")
+    monkeypatch.setattr(llm, "list_models", lambda provider, api_key: ["gemini-4-argon"])
+    at.radio(key="mode").set_value("使用 AI 模型").run()
+    assert not at.button(key="run").disabled  # AI 模型直接判讀 PDF 頁面影像
