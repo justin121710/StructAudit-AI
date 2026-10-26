@@ -30,8 +30,12 @@ def test_offline_review_flow_moves_output_to_the_right(monkeypatch):
     assert [t.label for t in at.tabs] == ["第 1 輪", "第 2 輪", "綜合裁決"]
     labels = [b.label for b in at.get("download_button")]
     assert labels == ["下載 PDF 報告", "下載 Excel", "下載 JSON", "下載調整後案件檔"]
+    assert [b.proto.label for b in at.get("link_button")] == ["開啟 RC 構件設計工具"]
+    assert len(session.thoughts) == 2 * 7 + 1  # 每次呼叫一段思考摘要
     at.run()  # 重新整理（例如按下載）後仍為左右兩欄，綜合裁決排在最前
     assert not at.exception and [t.label for t in at.tabs][0] == "綜合裁決"
+    assert "審查完成｜AI 思考過程（15 段）" in [e.label for e in at.expander]  # 點開可看各 Agent 的思考過程
+    assert any('class="vcard bad"' in x.value for x in at.markdown)  # 總判定卡片
 
 
 def test_pick_three_models_with_flagship_defaults(monkeypatch):

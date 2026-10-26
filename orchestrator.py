@@ -68,6 +68,7 @@ RISK_MEANING = {
 ProgressCallback = Callable[[str, str], None]
 MessageCallback = Callable[["DialogueMessage"], None]
 UsageCallback = Callable[[dict], None]
+ThinkingCallback = Callable[[dict, str], None]  # (思考段落紀錄, 新增文字)
 ClientFactory = Callable[[], LLMClient]
 
 
@@ -153,6 +154,7 @@ class ReviewSession:
     adjusted_rejected: list[str] = field(default_factory=list)
     spec_source: str = ""
     usage: list[dict] = field(default_factory=list)  # 每一次 API 呼叫的實際 token 用量（含輪次、角色）
+    thoughts: list[dict] = field(default_factory=list)  # 每一次 API 呼叫的思考摘要（輪次、角色、階段、模型、內容）
     prices: dict[str, Price] = field(default_factory=dict)  # 計費單價（模型 → 單價），未列者用預設值
     fx: float = USD_TWD  # 美元兌新台幣
     started_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -196,6 +198,7 @@ class ReviewSession:
             "rc_member_designer": {"case_file": self.case_name, "applied": self.adjusted_applied,
                                    "rejected": self.adjusted_rejected, "tool": rcmd.TOOL_URL},
             "usage": self.usage,
+            "thoughts": self.thoughts,
             "cost": self._cost_dict(),
             "transcript": [m.to_dict() for m in self.transcript],
             "notes": self.notes,
@@ -283,6 +286,7 @@ class ReviewOrchestrator:
         on_message: MessageCallback | None = None,
         library: SpecLibrary | None = None,
         on_usage: UsageCallback | None = None,
+        on_thinking: ThinkingCallback | None = None,
     ):
         """clients：三個模型槽位的 client 產生器（每呼叫一次建立全新的 client）；
         也可給單一產生器或單一 LLMClient（三個槽位共用，測試與離線示範用）。"""
@@ -295,7 +299,15 @@ class ReviewOrchestrator:
             factories = list(clients)
         self.slots = [factories[i % len(factories)] for i in range(3)]
         self.passes = max(1, int(passes))
-        self.on_progress = on_progress or (lambda stage, msg: None)
+        progress_cb = on_progress or (lambda stage, msg: None)
+        self._stage = ""
+
+        def progress(stage: str, text: str) -> None:
+            self._stage = text.rstrip("…").removesuffix("中")  # 供思考紀錄標示階段
+            progress_cb(stage, text)
+
+        self.on_progress = progress
+        self.on_thinking = on_thinking or (lambda entry, delta: None)
         self.on_message = on_message or (lambda msg: None)
         self.lib = library or load_library()
         self.on_usage = on_usage or (lambda record: None)
@@ -314,13 +326,23 @@ class ReviewOrchestrator:
     def _client(self, s: ReviewSession, slot: int, pass_no: int, role: str) -> LLMClient:
         """建立全新的 client，並把它每一次 API 呼叫的實際用量記入審查紀錄。"""
         c = self.slots[slot]()
+        current: dict = {}
 
         def record(u: Usage) -> None:
             rec = {"pass": pass_no, "role": role, **u.__dict__}
             s.usage.append(rec)
             self.on_usage(rec)
+            current.clear()  # 一次呼叫結束，下一段思考另起一筆
 
-        c.on_usage = record
+        def think(delta: str) -> None:
+            if not current:
+                current["entry"] = {"pass": pass_no, "role": role, "task": c._task, "stage": self._stage,
+                                    "model": c.model, "text": ""}
+                s.thoughts.append(current["entry"])
+            current["entry"]["text"] += delta
+            self.on_thinking(current["entry"], delta)
+
+        c.on_usage, c.on_thinking = record, think
         return c
 
     def run(self, calc: CalcBook, case: dict | None = None, case_name: str = "",
@@ -564,7 +586,7 @@ class ReviewOrchestrator:
         slot = self.roles_for(1)["C"]
         client = self._client(s, slot, 0, "F")
         s.final_model = f"{client.provider} / {client.model}"
-        self.on_progress("final", f"綜合裁決｜{AGENT_NAMES['F']} 彙整 {len(s.passes)} 輪結果中…")
+        self.on_progress("final", f"綜合裁決｜主任檢核技師 彙整 {len(s.passes)} 輪結果中…")
         lib = _PassLibrary(self.lib)
         blocks, payload = [], []
         for ps in s.passes:

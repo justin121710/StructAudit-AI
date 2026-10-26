@@ -117,6 +117,7 @@ class LLMClient(ABC):
         self.attachments_dropped = False  # 模型不接受 PDF 附件、改以擷取文字審查時為 True（記入報告）
         self.usage: list[Usage] = []  # 每一次 API 呼叫（含格式錯誤重試）的實際用量
         self.on_usage: Callable[[Usage], None] | None = None
+        self.on_thinking: Callable[[str], None] | None = None  # 串流中的思考摘要（逐段文字）
         self._task = ""
 
     def _record(self, **kw) -> None:
@@ -125,9 +126,13 @@ class LLMClient(ABC):
         if self.on_usage:
             self.on_usage(u)
 
+    def _think(self, delta: str | None) -> None:
+        if delta and self.on_thinking:
+            self.on_thinking(delta)
+
     @abstractmethod
     def _complete(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
-        """送出一次請求，回傳純文字。"""
+        """送出一次請求（串流接收，思考摘要經 _think 即時回報），回傳回覆文字。"""
 
     def generate(
         self,
@@ -169,6 +174,10 @@ def _rejects_files(err: Exception) -> bool:
 
 
 class OpenAIClient(LLMClient):
+    """OpenAI Responses API（串流）：可取得推理摘要；store=False，伺服器端不保留對話。
+
+    OPENAI_BASE_URL 指向不支援 Responses API 的相容服務時，自動改用 Chat Completions（沒有推理摘要）。"""
+
     provider = "openai"
 
     def __init__(self, model: str | None = None, api_key: str | None = None, **kw):
@@ -180,50 +189,77 @@ class OpenAIClient(LLMClient):
             raise LLMError("未設定 OPENAI_API_KEY")
         self._client = OpenAI(api_key=key, base_url=os.getenv("OPENAI_BASE_URL") or None)
         self._send_temperature = True
+        self._reasoning = True  # 非推理模型不接受 reasoning 參數
+        self._responses = True
 
     def _complete(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
-        from openai import BadRequestError
+        from openai import BadRequestError, NotFoundError
 
-        def content():
-            if not attachments or self.attachments_dropped:
-                return user
-            files = [{"type": "file", "file": {"filename": a.filename, "file_data": f"data:{a.mime};base64,{a.b64}"}}
-                     for a in attachments]
-            return [*files, {"type": "text", "text": user}]
-
-        def kwargs() -> dict[str, Any]:
-            kw: dict[str, Any] = dict(
-                model=self.model,
-                messages=[{"role": "system", "content": system}, {"role": "user", "content": content()}],
-                response_format={"type": "json_object"},
-            )
-            if self._send_temperature:
-                kw["temperature"] = temperature
-            return kw
-
-        for _ in range(3):
+        for _ in range(4):
             try:
-                resp = self._client.chat.completions.create(**kwargs())
-                u = getattr(resp, "usage", None)
-                if u:
-                    cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
-                    self._record(model=getattr(resp, "model", None), input=(u.prompt_tokens or 0) - cached,
-                                 cached=cached, output=u.completion_tokens or 0)  # completion_tokens 已含推理 token
-                return resp.choices[0].message.content or ""
+                return self._respond(system, user, attachments) if self._responses else \
+                    self._chat(system, user, temperature, attachments)
+            except NotFoundError:
+                if not self._responses:
+                    raise
+                self._responses = False  # 相容服務沒有 Responses API
             except BadRequestError as e:
-                if self._send_temperature and "temperature" in str(e):  # 部分推理模型不接受 temperature
-                    self._send_temperature = False
+                text = str(e)
+                if self._responses and self._reasoning and "reasoning" in text:
+                    self._reasoning = False
+                elif not self._responses and self._send_temperature and "temperature" in text:
+                    self._send_temperature = False  # 部分推理模型不接受 temperature
                 elif attachments and not self.attachments_dropped and _rejects_files(e):
                     self.attachments_dropped = True  # 不支援 PDF 附件的模型改用擷取文字
                 else:
                     raise
         raise LLMError("OpenAI 請求參數無法調整至可接受的格式")
 
+    def _respond(self, system: str, user: str, attachments: list[Attachment]) -> str:
+        content: list[dict] = [] if self.attachments_dropped else [
+            {"type": "input_file", "filename": a.filename, "file_data": f"data:{a.mime};base64,{a.b64}"}
+            for a in attachments]
+        content.append({"type": "input_text", "text": user})
+        kw: dict[str, Any] = dict(model=self.model, instructions=system, store=False,
+                                  input=[{"role": "user", "content": content}], text={"format": {"type": "json_object"}})
+        if self._reasoning:
+            kw["reasoning"] = {"summary": "auto"}
+        with self._client.responses.stream(**kw) as stream:
+            for event in stream:
+                if event.type == "response.reasoning_summary_text.delta":
+                    self._think(event.delta)
+                elif event.type == "response.reasoning_summary_part.done":
+                    self._think("\n\n")
+            resp = stream.get_final_response()
+        u = getattr(resp, "usage", None)
+        if u:
+            cached = getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0
+            self._record(model=getattr(resp, "model", None), input=(u.input_tokens or 0) - cached, cached=cached,
+                         output=u.output_tokens or 0)  # output_tokens 已含推理 token
+        return resp.output_text or ""
+
+    def _chat(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
+        content: Any = user
+        if attachments and not self.attachments_dropped:
+            content = [*({"type": "file", "file": {"filename": a.filename, "file_data": f"data:{a.mime};base64,{a.b64}"}}
+                         for a in attachments), {"type": "text", "text": user}]
+        kw: dict[str, Any] = dict(model=self.model, response_format={"type": "json_object"},
+                                  messages=[{"role": "system", "content": system}, {"role": "user", "content": content}])
+        if self._send_temperature:
+            kw["temperature"] = temperature
+        resp = self._client.chat.completions.create(**kw)
+        u = getattr(resp, "usage", None)
+        if u:
+            cached = getattr(getattr(u, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+            self._record(model=getattr(resp, "model", None), input=(u.prompt_tokens or 0) - cached,
+                         cached=cached, output=u.completion_tokens or 0)  # completion_tokens 已含推理 token
+        return resp.choices[0].message.content or ""
+
 
 # 支援伺服器端拒答備援的模型：模型基於安全理由拒答時，API 會在同一次請求內改由其他模型接手
 CLAUDE_FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
-# 非串流請求的上限（再高 SDK 會要求改用串流）；思考內容也計入，故取接近上限的值
-CLAUDE_MAX_TOKENS = 20000
+# 串流請求，可給較大的上限；思考內容也計入
+CLAUDE_MAX_TOKENS = 64000
 
 
 class ClaudeClient(LLMClient):
@@ -237,9 +273,12 @@ class ClaudeClient(LLMClient):
         if not key:
             raise LLMError("未設定 ANTHROPIC_API_KEY")
         self._client = anthropic.Anthropic(api_key=key)
+        self._summarize = True  # 舊模型不支援 adaptive thinking 時改為不帶 thinking 參數
 
     def _complete(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
-        # 新版 API 已不接受 temperature；思考模式維持模型預設
+        import anthropic
+
+        # 新版 API 已不接受 temperature；思考採 adaptive 並要求回傳思考摘要（預設不回傳）
         blocks: list[dict] = []
         if not self.attachments_dropped:
             for a in attachments:
@@ -247,13 +286,28 @@ class ClaudeClient(LLMClient):
                 blocks.append({"type": "document", "title": a.filename, "cache_control": {"type": "ephemeral"},
                                "source": {"type": "base64", "media_type": a.mime, "data": a.b64}})
         blocks.append({"type": "text", "text": user})
-        kwargs = dict(model=self.model, max_tokens=CLAUDE_MAX_TOKENS, system=system,
-                      messages=[{"role": "user", "content": blocks}])
+        kwargs: dict[str, Any] = dict(model=self.model, max_tokens=CLAUDE_MAX_TOKENS, system=system,
+                                      messages=[{"role": "user", "content": blocks}])
+        if self._summarize:
+            kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
         if self.model in CLAUDE_FALLBACK_MODELS:
-            resp = self._client.beta.messages.create(
-                betas=["server-side-fallback-2026-07-01"], fallbacks="default", **kwargs)
+            api, extra = self._client.beta.messages, dict(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
         else:
-            resp = self._client.messages.create(**kwargs)
+            api, extra = self._client.messages, {}
+        try:
+            with api.stream(**kwargs, **extra) as stream:
+                for event in stream:
+                    if event.type == "content_block_delta" and getattr(event.delta, "type", "") == "thinking_delta":
+                        self._think(event.delta.thinking)
+                    elif event.type == "content_block_stop" and getattr(event, "content_block", None) is not None \
+                            and getattr(event.content_block, "type", "") == "thinking":
+                        self._think("\n\n")
+                resp = stream.get_final_message()
+        except anthropic.BadRequestError as e:
+            if self._summarize and "thinking" in str(e):
+                self._summarize = False
+                return self._complete(system, user, temperature, attachments)
+            raise
         u = getattr(resp, "usage", None)
         if u:
             # 拒答備援時，usage.iterations 分列各模型的用量（各依自己的單價計費）；沒有時用總量
@@ -283,35 +337,69 @@ class GeminiClient(LLMClient):
         if not key:
             raise LLMError("未設定 GEMINI_API_KEY")
         self._client = genai.Client(api_key=key)
+        self._thoughts = True  # 不支援思考的模型改為不要求思考摘要
 
     def _complete(self, system: str, user: str, temperature: float, attachments: list[Attachment]) -> str:
         from google.genai import errors, types
 
-        def contents():
-            if not attachments or self.attachments_dropped:
-                return user
-            return [*(types.Part.from_bytes(data=a.data, mime_type=a.mime) for a in attachments), user]
+        for _ in range(3):
+            contents: Any = user if not attachments or self.attachments_dropped else \
+                [*(types.Part.from_bytes(data=a.data, mime_type=a.mime) for a in attachments), user]
+            config = types.GenerateContentConfig(
+                system_instruction=system, temperature=temperature, response_mime_type="application/json",
+                thinking_config=types.ThinkingConfig(include_thoughts=True) if self._thoughts else None)
+            try:
+                return self._stream(contents, config)
+            except errors.ClientError as e:
+                if self._thoughts and "think" in str(e).lower():
+                    self._thoughts = False
+                elif attachments and not self.attachments_dropped and _rejects_files(e):
+                    self.attachments_dropped = True
+                else:
+                    raise
+        raise LLMError("Gemini 請求參數無法調整至可接受的格式")
 
-        config = types.GenerateContentConfig(system_instruction=system, temperature=temperature,
-                                             response_mime_type="application/json")
-        try:
-            resp = self._client.models.generate_content(model=self.model, contents=contents(), config=config)
-        except errors.ClientError as e:
-            if not attachments or self.attachments_dropped or not _rejects_files(e):
-                raise
-            self.attachments_dropped = True
-            resp = self._client.models.generate_content(model=self.model, contents=user, config=config)
-        m = getattr(resp, "usage_metadata", None)
-        if m:
-            cached = getattr(m, "cached_content_token_count", 0) or 0
-            self._record(input=(getattr(m, "prompt_token_count", 0) or 0) - cached, cached=cached,
-                         output=(getattr(m, "candidates_token_count", 0) or 0) + (getattr(m, "thoughts_token_count", 0) or 0))
-        return resp.text or ""
+    def _stream(self, contents, config) -> str:
+        text, meta = [], None
+        for chunk in self._client.models.generate_content_stream(model=self.model, contents=contents, config=config):
+            for cand in chunk.candidates or []:
+                for part in (cand.content.parts if cand.content else None) or []:
+                    if getattr(part, "thought", False):
+                        self._think(part.text)  # 思考摘要
+                    elif part.text:
+                        text.append(part.text)
+            meta = getattr(chunk, "usage_metadata", None) or meta
+        if meta:
+            cached = getattr(meta, "cached_content_token_count", 0) or 0
+            self._record(input=(getattr(meta, "prompt_token_count", 0) or 0) - cached, cached=cached,
+                         output=(getattr(meta, "candidates_token_count", 0) or 0)
+                         + (getattr(meta, "thoughts_token_count", 0) or 0))
+        return "".join(text)
 
 
 # ---------------------------------------------------------------------------
 # 離線示範
 # ---------------------------------------------------------------------------
+MOCK_THOUGHTS = {
+    "lookup": ["先看計算書第 1 頁的設計依據：土木401 ＋ 建築物耐震設計規範，構材為柱端加密區。",
+               "接下來要核對的項目會用到耐震柱的橫向鋼筋（§18.4.5）與強柱弱梁（§18.4.3），先把這兩節查出來。"],
+    "lookup_round2": ["外審引用了 §18.4.5.4、表 18.4.5.4 與 §18.4.3.2，這些條文已提供；回覆前不需要再查其他條文。"],
+    "lookup_round3": ["終審需要確認修正方案是否符合同一組條文，已提供的條文足夠。"],
+    "round1": ["逐頁讀計算書：第 15 頁「檢核彙總與總判定」列出兩項 NG。",
+               "第一項：圍束筋需求間距 6.21 cm 小於最小實務間距 7.5 cm，對照表 18.4.5.4 的 A_sh 公式確認來源。",
+               "第二項：ΣM_nc = 128.4 < 1.2ΣM_nb = 132.0 tf·m，§18.4.3.2 要求 ΣM_nc ≥ (6/5)ΣM_nb，確實不符。",
+               "附註列出兩項未涵蓋的檢核，送審資料沒有對應成果，列為中風險。"],
+    "round2": ["外審指出的兩項 NG 都是計算書本身的判定，數值無誤，無法抗辯，應承認並提出修正方向。",
+               "未涵蓋的兩項屬於整體結構計算書的範圍，可說明出處。"],
+    "round3": ["設計單位已承認缺失，但送審版本仍不符規範，風險維持高風險。",
+               "圍束筋：箍筋 #3→#4 單肢面積 0.713→1.267 cm²，需求間距約放大 1.78 倍，可回到實務範圍，改動最小。",
+               "強柱弱梁：主筋 #8→#9 只換號數、根數不變；改為每面 4 根的改動較大，列為方案 2。"],
+    "chief": ["複核外審方案：兩個方案都只改一個欄位，斷面不變，採用改動最小者。",
+              "有高風險項目，本輪結論為退回補正。"],
+    "final": ["三輪結果一致，合併同一問題的疑義，風險取最嚴者。", "最終方案沿用各輪採用的最小改動方案。"],
+}
+
+
 class MockClient(LLMClient):
     """離線示範：依計算書文字（rc-member-designer 計算書的「不合格項目」「未涵蓋」）產生確定性回覆。
 
@@ -328,12 +416,19 @@ class MockClient(LLMClient):
         raise NotImplementedError
 
     def generate(self, system, user, schema, *, temperature=0.3, task="", payload=None, attachments=None):
-        if self.delay:
-            time.sleep(self.delay)
         builder = getattr(self, f"_mock_{task}", None)
         if builder is None:
             raise LLMError(f"Mock 不支援 task={task!r}")
         self._task = task
+        key = f"lookup_{(payload or {}).get('stage')}" if task == "lookup" else task
+        for line in MOCK_THOUGHTS.get(key) or MOCK_THOUGHTS.get(task, []):  # 模擬串流的思考摘要
+            for k in range(0, len(line), 12):
+                self._think(line[k:k + 12])
+                if self.delay:
+                    time.sleep(self.delay / 40)
+            self._think("\n\n")
+        if self.delay:
+            time.sleep(self.delay)
         out = schema.model_validate(builder(payload or {}))
         self._record(input=estimate_tokens(system + user), output=estimate_tokens(out.model_dump_json()), estimated=True)
         return out

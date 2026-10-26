@@ -210,30 +210,59 @@ def test_model_filters_and_flagship_defaults():
     assert default_model("openai", ["o3"]) is None
 
 
-def test_claude_client_sends_pdf_document(monkeypatch):
+class FakeStream:
+    """模擬 SDK 的串流 context manager：依序吐出事件，最後回傳完整回覆。"""
+
+    def __init__(self, events, final):
+        self.events, self.final = events, final
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return iter(self.events)
+
+    def get_final_message(self):
+        return self.final
+
+    get_final_response = get_final_message
+
+
+def claude_reply(stop="end_turn", text='{"ok": 1}', usage=None, model="claude-opus-5-5"):
+    return NS(stop_reason=stop, stop_details=NS(category="cyber") if stop == "refusal" else None, usage=usage,
+              model=model, content=[NS(type="thinking", thinking="摘要"), NS(type="text", text=text)])
+
+
+def test_claude_client_streams_thinking_and_sends_pdf():
     from agents.llm_client import ClaudeClient
 
     calls = []
-
-    def reply(stop="end_turn", text='{"ok": 1}'):
-        return NS(stop_reason=stop, stop_details=NS(category="cyber") if stop == "refusal" else None,
-                  content=[NS(type="thinking", thinking=""), NS(type="text", text=text)])
+    thinking = [NS(type="content_block_delta", delta=NS(type="thinking_delta", thinking="先核對第 15 頁")),
+                NS(type="content_block_delta", delta=NS(type="thinking_delta", thinking="的強柱弱梁。")),
+                NS(type="content_block_delta", delta=NS(type="text_delta", text="{"))]
 
     class FakeMessages:
+        reply = claude_reply()
+
         def __init__(self, beta):
             self.beta = beta
 
-        def create(self, **kw):
+        def stream(self, **kw):
             calls.append((self.beta, kw))
-            return FakeMessages.next_reply
+            return FakeStream(thinking, FakeMessages.reply)
 
     c = ClaudeClient("claude-opus-5-5", api_key="k")
     c._client = NS(messages=FakeMessages(False), beta=NS(messages=FakeMessages(True)))
-    FakeMessages.next_reply = reply()
-    att = [Attachment("calc.pdf", b"%PDF-1.4 x")]
-    assert c._complete("sys", "user", 0.3, att) == '{"ok": 1}'
+    seen = []
+    c.on_thinking = seen.append
+    assert c._complete("sys", "user", 0.3, [Attachment("calc.pdf", b"%PDF-1.4 x")]) == '{"ok": 1}'
+    assert "".join(seen) == "先核對第 15 頁的強柱弱梁。"  # 思考摘要即時回報
     beta, kw = calls[-1]
     assert beta and kw["fallbacks"] == "default" and kw["betas"] == ["server-side-fallback-2026-07-01"]
+    assert kw["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert "temperature" not in kw and kw["system"] == "sys"
     doc, text = kw["messages"][0]["content"]
     assert doc["type"] == "document" and doc["source"]["media_type"] == "application/pdf" and text["text"] == "user"
@@ -243,62 +272,75 @@ def test_claude_client_sends_pdf_document(monkeypatch):
     beta, kw = calls[-1]
     assert not beta and "fallbacks" not in kw and len(kw["messages"][0]["content"]) == 1
 
-    FakeMessages.next_reply = reply("refusal")
+    FakeMessages.reply = claude_reply("refusal")
     with pytest.raises(LLMError, match="拒絕"):
         c.generate("sys", "user", S.LookupRequest)
 
 
-def test_openai_client_attaches_pdf_and_falls_back_to_text():
+def test_openai_client_streams_reasoning_and_falls_back_to_text():
     from openai import BadRequestError
 
     from agents.llm_client import OpenAIClient
 
     sent = []
+    usage = NS(input_tokens=40000, output_tokens=9000, input_tokens_details=NS(cached_tokens=10000))
+    events = [NS(type="response.reasoning_summary_text.delta", delta="比對 §18.4.3.2"),
+              NS(type="response.output_text.delta", delta="{")]
 
-    class FakeCompletions:
-        def create(self, **kw):
+    class FakeResponses:
+        def stream(self, **kw):
             sent.append(kw)
-            if isinstance(kw["messages"][1]["content"], list) and len(sent) == 1:
+            if kw["input"][0]["content"][0]["type"] == "input_file":
                 raise BadRequestError("file inputs are not supported for this model",
                                       response=NS(request=None, status_code=400, headers={}), body=None)
-            return NS(choices=[NS(message=NS(content='{"ok": 1}'))])
+            return FakeStream(events, NS(output_text='{"ok": 1}', usage=usage, model="gpt-6.1-sol"))
 
     c = OpenAIClient("gpt-6.1-sol", api_key="k")
-    c._client = NS(chat=NS(completions=FakeCompletions()))
+    c._client = NS(responses=FakeResponses())
+    seen = []
+    c.on_thinking = seen.append
     assert c._complete("sys", "user", 0.3, [Attachment("calc.pdf", b"%PDF")]) == '{"ok": 1}'
     first, second = sent
-    assert first["messages"][1]["content"][0]["type"] == "file"
-    assert second["messages"][1]["content"] == "user" and c.attachments_dropped
+    assert first["store"] is False and first["reasoning"] == {"summary": "auto"}  # 伺服器端不保留對話
+    assert first["text"] == {"format": {"type": "json_object"}} and first["instructions"] == "sys"
+    assert second["input"][0]["content"] == [{"type": "input_text", "text": "user"}] and c.attachments_dropped
+    assert seen == ["比對 §18.4.3.2"]
+    assert (c.usage[-1].input, c.usage[-1].cached, c.usage[-1].output) == (30000, 10000, 9000)
 
 
-def test_usage_is_read_from_each_provider():
-    from agents.llm_client import ClaudeClient, GeminiClient, OpenAIClient
+def test_usage_and_thoughts_from_claude_and_gemini():
+    from agents.llm_client import ClaudeClient, GeminiClient
 
     seen = []
     c = ClaudeClient("claude-opus-5-5", api_key="k")
     usage = NS(input_tokens=1000, cache_read_input_tokens=30000, cache_creation_input_tokens=0, output_tokens=5000,
                iterations=None)
-    c._client = NS(beta=NS(messages=NS(create=lambda **kw: NS(stop_reason="end_turn", stop_details=None, usage=usage,
-                                                              model="claude-opus-5-5",
-                                                              content=[NS(type="text", text="{}")]))))
+    c._client = NS(beta=NS(messages=NS(stream=lambda **kw: FakeStream([], claude_reply(usage=usage)))))
     c.on_usage = seen.append
     c._task = "round1"
     c._complete("s", "u", 0.3, [])
     assert (seen[-1].input, seen[-1].cached, seen[-1].output, seen[-1].task) == (1000, 30000, 5000, "round1")
 
-    o = OpenAIClient("gpt-6.1-sol", api_key="k")
-    u = NS(prompt_tokens=40000, completion_tokens=9000, prompt_tokens_details=NS(cached_tokens=10000))
-    o._client = NS(chat=NS(completions=NS(create=lambda **kw: NS(usage=u, model="gpt-6.1-sol",
-                                                                  choices=[NS(message=NS(content="{}"))]))))
-    o._complete("s", "u", 0.3, [])
-    assert (o.usage[-1].input, o.usage[-1].cached, o.usage[-1].output) == (30000, 10000, 9000)
-
     g = GeminiClient("gemini-4-argon", api_key="k")
     meta = NS(prompt_token_count=20000, cached_content_token_count=0, candidates_token_count=3000,
               thoughts_token_count=4000)
-    g._client = NS(models=NS(generate_content=lambda **kw: NS(text="{}", usage_metadata=meta)))
-    g._complete("s", "u", 0.3, [])
+    part = lambda text, thought=False: NS(text=text, thought=thought)  # noqa: E731
+    chunks = [NS(candidates=[NS(content=NS(parts=[part("先讀表頭", True)]))], usage_metadata=None),
+              NS(candidates=[NS(content=NS(parts=[part('{"ok"'), part(": 1}")]))], usage_metadata=meta)]
+    g._client = NS(models=NS(generate_content_stream=lambda **kw: iter(chunks)))
+    thoughts = []
+    g.on_thinking = thoughts.append
+    assert g._complete("s", "u", 0.3, []) == '{"ok": 1}'
+    assert thoughts == ["先讀表頭"]
     assert (g.usage[-1].input, g.usage[-1].output) == (20000, 7000)  # 思考 token 計入輸出
+
+
+def test_thinking_entries_recorded_per_call(calc):
+    s = ReviewOrchestrator(MockClient, passes=1).run(calc)
+    assert len(s.thoughts) == 8  # 每次呼叫一段：查閱×3＋Round 1～3＋主任技師＋綜合裁決
+    first = s.thoughts[0]
+    assert first["role"] == "B" and first["task"] == "lookup" and "Round 1" in first["stage"] and first["text"]
+    assert s.to_dict()["thoughts"][3]["task"] == "round2"
 
 
 def test_cost_uses_model_prices_and_fx():

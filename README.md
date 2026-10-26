@@ -90,6 +90,20 @@ Claude 的 Opus 5.5、Opus 5、Sonnet 5.5、Fable 5.1 會開啟伺服器端拒�
   系統把最終方案的參數變更寫入「調整後案件檔」；在工具中按「開啟案件」載入、重算，即可確認各檢核項目轉為 OK。
   以示範計算書為例：原案件有 2 項 NG（圍束筋間距無解、強柱弱梁），調整後案件檔（箍筋 #3→#4、主筋 #8→#9）在工具中重算後 NG 為 0。
 
+## 即時顯示 AI 思考過程
+
+審查進行中，右側上方的進度列「審查進行中｜點開可看 AI 正在思考什麼」點開後，可即時看到每一位 Agent 正在思考的內容
+（每一次 API 呼叫一段，標示輪次、回合、角色與模型）；完成後同一位置保留「AI 思考過程」紀錄，JSON 的 `thoughts` 也有完整內容。
+
+| 服務商 | 取得方式 |
+|---|---|
+| Claude | 串流＋`thinking: {type: "adaptive", display: "summarized"}`，讀取 `thinking_delta` |
+| OpenAI | Responses API 串流＋`reasoning: {summary: "auto"}`，讀取 `response.reasoning_summary_text.delta`；`store=False`，伺服器端不保留對話 |
+| Gemini | 串流＋`ThinkingConfig(include_thoughts=True)`，讀取 `thought` 部分 |
+
+三家提供的都是「思考摘要」，不是完整的內部推理；不支援思考摘要的模型（或 OPENAI_BASE_URL 指向沒有 Responses API 的相容服務）
+會自動改用一般請求，只是沒有思考內容。目前階段顯示在進度列上方（若把階段寫在進度列標題，每次更新都會把使用者點開的進度列收起）。
+
 ## 實際花費
 
 每一次 API 呼叫（含查閱規範與格式錯誤重試）都讀取服務商回報的實際用量：
