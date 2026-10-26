@@ -1,0 +1,1690 @@
+{
+ "source": "https://github.com/justin121710/rc-member-designer",
+ "app": "rc-section-designer",
+ "modules": {
+  "pylon": [
+   {
+    "id": "B",
+    "symbol": "B",
+    "label": "外寬",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "H",
+    "symbol": "H",
+    "label": "外高",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "Dia",
+    "symbol": "D",
+    "label": "直徑",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "tw",
+    "symbol": "t_w",
+    "label": "壁厚",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "covO",
+    "symbol": "c_o",
+    "label": "外側保護層",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "brExpo",
+    "symbol": "—",
+    "label": "保護層環境（橋梁）",
+    "unit": "",
+    "group": "斷面幾何",
+    "options": [
+     [
+      "air",
+      "露置於土中或大氣中（主筋 5.0／箍筋 4.0）"
+     ],
+     [
+      "in",
+      "不曝露大氣中或不與土壤接觸（主筋 4.0／箍筋 2.5）"
+     ],
+     [
+      "cast",
+      "直接澆鑄且永久埋置於土中或水中（7.5）"
+     ]
+    ]
+   },
+   {
+    "id": "covI",
+    "symbol": "c_i",
+    "label": "內側保護層",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "dagg",
+    "symbol": "d_agg",
+    "label": "骨材最大粒徑",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "fc",
+    "symbol": "f'_c",
+    "label": "混凝土抗壓強度",
+    "unit": "kgf/cm²",
+    "group": "材料"
+   },
+   {
+    "id": "fy",
+    "symbol": "f_y",
+    "label": "主筋降伏強度",
+    "unit": "kgf/cm²",
+    "group": "材料",
+    "options": [
+     [
+      "4200",
+      "4200 (SD420／SD420W)"
+     ],
+     [
+      "5000",
+      "5000 (SD490W)"
+     ],
+     [
+      "5600",
+      "5600 (SD550W)"
+     ]
+    ]
+   },
+   {
+    "id": "fyt",
+    "symbol": "f_yt",
+    "label": "橫向筋降伏強度",
+    "unit": "kgf/cm²",
+    "group": "材料",
+    "options": [
+     [
+      "4200",
+      "4200 (SD420／SD420W)"
+     ],
+     [
+      "2800",
+      "2800 (SD280／SD280W)"
+     ],
+     [
+      "5000",
+      "5000 (SD490W)"
+     ],
+     [
+      "5600",
+      "5600 (SD550W)"
+     ]
+    ]
+   },
+   {
+    "id": "Es",
+    "symbol": "E_s",
+    "label": "鋼筋彈性模數",
+    "unit": "kgf/cm²",
+    "group": "材料"
+   },
+   {
+    "id": "ecu",
+    "symbol": "ε_cu",
+    "label": "混凝土極限壓應變",
+    "unit": "",
+    "group": "材料"
+   },
+   {
+    "id": "esu",
+    "symbol": "ε_su",
+    "label": "箍筋極限應變",
+    "unit": "",
+    "group": "材料"
+   },
+   {
+    "id": "barSize",
+    "symbol": "—",
+    "label": "主筋號數",
+    "unit": "",
+    "group": "主筋",
+    "options": [
+     [
+      "#4",
+      "#4（d_b = 1.27 cm，A_b = 1.267 cm²）"
+     ],
+     [
+      "#5",
+      "#5（d_b = 1.59 cm，A_b = 1.986 cm²）"
+     ],
+     [
+      "#6",
+      "#6（d_b = 1.91 cm，A_b = 2.865 cm²）"
+     ],
+     [
+      "#7",
+      "#7（d_b = 2.22 cm，A_b = 3.871 cm²）"
+     ],
+     [
+      "#8",
+      "#8（d_b = 2.54 cm，A_b = 5.067 cm²）"
+     ],
+     [
+      "#9",
+      "#9（d_b = 2.87 cm，A_b = 6.469 cm²）"
+     ],
+     [
+      "#10",
+      "#10（d_b = 3.22 cm，A_b = 8.143 cm²）"
+     ],
+     [
+      "#11",
+      "#11（d_b = 3.58 cm，A_b = 10.07 cm²）"
+     ],
+     [
+      "#12",
+      "#12（d_b = 3.94 cm，A_b = 12.19 cm²）"
+     ],
+     [
+      "#14",
+      "#14（d_b = 4.3 cm，A_b = 14.52 cm²）"
+     ],
+     [
+      "#16",
+      "#16（d_b = 5.02 cm，A_b = 19.79 cm²）"
+     ],
+     [
+      "#18",
+      "#18（d_b = 5.73 cm，A_b = 25.79 cm²）"
+     ]
+    ]
+   },
+   {
+    "id": "nB",
+    "symbol": "n_B",
+    "label": "B 向每面根數",
+    "unit": "根",
+    "group": "主筋"
+   },
+   {
+    "id": "nH",
+    "symbol": "n_H",
+    "label": "H 向每面根數",
+    "unit": "根",
+    "group": "主筋"
+   },
+   {
+    "id": "nCir",
+    "symbol": "n",
+    "label": "主筋總根數",
+    "unit": "根",
+    "group": "主筋"
+   },
+   {
+    "id": "dbl",
+    "symbol": "—",
+    "label": "內層同配置",
+    "unit": "",
+    "group": "主筋",
+    "options": [
+     [
+      "1",
+      "是（雙層）"
+     ],
+     [
+      "0",
+      "否（單層）"
+     ]
+    ]
+   },
+   {
+    "id": "tieSize",
+    "symbol": "—",
+    "label": "箍筋 / 繫筋號數",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "#3",
+      "#3（d_b = 0.953 cm，A_b = 0.7133 cm²）"
+     ],
+     [
+      "#4",
+      "#4（d_b = 1.27 cm，A_b = 1.267 cm²）"
+     ],
+     [
+      "#5",
+      "#5（d_b = 1.59 cm，A_b = 1.986 cm²）"
+     ],
+     [
+      "#6",
+      "#6（d_b = 1.91 cm，A_b = 2.865 cm²）"
+     ],
+     [
+      "#7",
+      "#7（d_b = 2.22 cm，A_b = 3.871 cm²）"
+     ]
+    ]
+   },
+   {
+    "id": "spiral",
+    "symbol": "—",
+    "label": "圓柱橫向筋型式",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "spiral",
+      "螺旋箍筋（連續）"
+     ],
+     [
+      "hoop",
+      "圓形箍筋（單圈搭接）"
+     ]
+    ]
+   },
+   {
+    "id": "ph",
+    "symbol": "—",
+    "label": "塑鉸區／柱端加密區",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "1",
+      "是（塑鉸區／柱端加密區）"
+     ],
+     [
+      "0",
+      "否（一般斷面）"
+     ]
+    ]
+   },
+   {
+    "id": "phEnds",
+    "symbol": "—",
+    "label": "塑鉸區位置",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "2",
+      "兩端（柱端皆加密）"
+     ],
+     [
+      "1",
+      "僅底端（懸臂墩柱／橋塔）"
+     ]
+    ]
+   },
+   {
+    "id": "scwbMbX",
+    "symbol": "ΣM_nb,x",
+    "label": "接頭梁 ΣM_nb（繞 X 軸）",
+    "unit": "tf·m",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "scwbMbY",
+    "symbol": "ΣM_nb,y",
+    "label": "接頭梁 ΣM_nb（繞 Y 軸）",
+    "unit": "tf·m",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "scwbNc",
+    "symbol": "—",
+    "label": "構入接頭之柱數",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "2",
+      "2（接頭上、下皆有柱）"
+     ],
+     [
+      "1",
+      "1（頂層柱）"
+     ]
+    ]
+   },
+   {
+    "id": "lu",
+    "symbol": "l_u",
+    "label": "柱淨高",
+    "unit": "cm",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "phio",
+    "symbol": "φ_o",
+    "label": "超強係數",
+    "unit": "",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "vcRule",
+    "symbol": "—",
+    "label": "建築柱 V_c 歸零條件",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "ab",
+      "§18.4.6.2.1 (a) 且 (b)"
+     ],
+     [
+      "b",
+      "僅依軸力 (b)（保守）"
+     ]
+    ]
+   },
+   {
+    "id": "brMnP",
+    "symbol": "—",
+    "label": "最大可能彎矩之軸力",
+    "unit": "",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "brPD",
+    "symbol": "P_D",
+    "label": "靜載重軸力",
+    "unit": "tf",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "brVelX",
+    "symbol": "V_el",
+    "label": "彈性剪力上限（X 向）",
+    "unit": "tf",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "brVelY",
+    "symbol": "V_el",
+    "label": "彈性剪力上限（Y 向）",
+    "unit": "tf",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "brPe",
+    "symbol": "P_e",
+    "label": "圍束筋之軸力 P_e",
+    "unit": "tf",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "Lv",
+    "symbol": "L_v",
+    "label": "柱高（含帽梁）",
+    "unit": "cm",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "theta",
+    "symbol": "θ",
+    "label": "扭矩桁架角",
+    "unit": "°",
+    "group": "橫向筋 / 耐震"
+   },
+   {
+    "id": "tieLayout",
+    "symbol": "—",
+    "label": "繫筋配置",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "code",
+      "規範最低（每隔一根）"
+     ],
+     [
+      "all",
+      "每一根主筋皆設"
+     ],
+     [
+      "custom",
+      "自訂（於斷面圖點選）"
+     ]
+    ]
+   },
+   {
+    "id": "ashPair",
+    "symbol": "b_c",
+    "label": "A_sh 之 b_c 配對",
+    "unit": "",
+    "group": "橫向筋 / 耐震",
+    "options": [
+     [
+      "perp",
+      "垂直（肢的跨距；規範解說 R18.4.5.4）"
+     ],
+     [
+      "para",
+      "平行（量至肢外緣）"
+     ]
+    ]
+   },
+   {
+    "id": "memType",
+    "symbol": "—",
+    "label": "構材類型",
+    "unit": "",
+    "group": "基樁",
+    "options": [
+     [
+      "col",
+      "柱／墩柱"
+     ],
+     [
+      "pile",
+      "場鑄基樁（無套管鑽掘）"
+     ]
+    ]
+   },
+   {
+    "id": "pileL",
+    "symbol": "L",
+    "label": "樁長",
+    "unit": "cm",
+    "group": "基樁"
+   },
+   {
+    "id": "pileSite",
+    "symbol": "—",
+    "label": "地盤類別",
+    "unit": "",
+    "group": "基樁"
+   },
+   {
+    "id": "pileEccMode",
+    "symbol": "—",
+    "label": "施工偏心",
+    "unit": "",
+    "group": "基樁",
+    "options": [
+     [
+      "user",
+      "樁頭偏差 e（輸入）"
+     ],
+     [
+      "L75",
+      "e = L/75（垂直度上限）"
+     ],
+     [
+      "none",
+      "不計"
+     ]
+    ]
+   },
+   {
+    "id": "pileE",
+    "symbol": "e",
+    "label": "樁頭偏差",
+    "unit": "cm",
+    "group": "基樁"
+   },
+   {
+    "id": "pileInfl",
+    "symbol": "—",
+    "label": "彎矩反曲點深度",
+    "unit": "cm",
+    "group": "基樁"
+   },
+   {
+    "id": "slFrame",
+    "symbol": "—",
+    "label": "側向位移支撐",
+    "unit": "",
+    "group": "長細效應",
+    "options": [
+     [
+      "sway",
+      "無側向位移支撐（有側移）"
+     ],
+     [
+      "braced",
+      "有側向位移支撐（無側移）"
+     ]
+    ]
+   },
+   {
+    "id": "slTreat",
+    "symbol": "—",
+    "label": "二階效應處理方式",
+    "unit": "",
+    "group": "長細效應",
+    "options": [
+     [
+      "mag",
+      "輸入為一階分析結果（本工具彎矩放大）"
+     ],
+     [
+      "second",
+      "輸入已含二階效應（P-Δ 與 P-δ）"
+     ]
+    ]
+   },
+   {
+    "id": "slBeta",
+    "symbol": "β",
+    "label": "持續載重比",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "slBetaS",
+    "symbol": "β_ds",
+    "label": "持續側力比",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "slQ",
+    "symbol": "Q",
+    "label": "樓層穩定指數",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "slK",
+    "symbol": "k_x",
+    "label": "有效長度係數（繞 X 軸）",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "slKy",
+    "symbol": "k_y",
+    "label": "有效長度係數（繞 Y 軸）",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "slLuY",
+    "symbol": "l_u,y",
+    "label": "柱淨高（繞 Y 軸）",
+    "unit": "cm",
+    "group": "長細效應"
+   },
+   {
+    "id": "slM12",
+    "symbol": "M_1/M_2",
+    "label": "端彎矩比",
+    "unit": "",
+    "group": "長細效應"
+   },
+   {
+    "id": "phic",
+    "symbol": "φ_c",
+    "label": "壓力控制",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "phit",
+    "symbol": "φ_t",
+    "label": "拉力控制",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "phiv",
+    "symbol": "φ_v",
+    "label": "剪力 / 扭矩",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "phivB",
+    "symbol": "φ",
+    "label": "橋梁剪力",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "brPhiMode",
+    "symbol": "φ",
+    "label": "橋梁彎矩／軸力 φ",
+    "unit": "",
+    "group": "規範係數",
+    "options": [
+     [
+      "532",
+      "公路橋梁耐震設計規範 §5.3.2（依軸壓應力）"
+     ]
+    ]
+   },
+   {
+    "id": "pmaxf",
+    "symbol": "—",
+    "label": "軸力截斷（×P_o）",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "alpha",
+    "symbol": "α",
+    "label": "低軸壓輪廓指數",
+    "unit": "",
+    "group": "規範係數"
+   },
+   {
+    "id": "dEpoxy",
+    "symbol": "ψ_e",
+    "label": "鋼筋塗布",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "否（未塗布）"
+     ],
+     [
+      "1",
+      "是（環氧樹脂塗布）"
+     ]
+    ]
+   },
+   {
+    "id": "dLight",
+    "symbol": "λ",
+    "label": "混凝土種類（輕質 λ）",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "常重混凝土（λ = 1.0）"
+     ],
+     [
+      "0.75",
+      "輕質混凝土（λ = 0.75）"
+     ]
+    ]
+   },
+   {
+    "id": "dWc",
+    "symbol": "w_c",
+    "label": "混凝土單位重",
+    "unit": "kg/m³",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "dSlurry",
+    "symbol": "—",
+    "label": "混凝土澆置方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "一般澆置"
+     ],
+     [
+      "1",
+      "泥水中灌注（連續壁、場鑄樁）"
+     ]
+    ]
+   },
+   {
+    "id": "dExcess",
+    "symbol": "—",
+    "label": "超量鋼筋折減",
+    "unit": "",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "dPsiR",
+    "symbol": "ψ_r／ψ_p",
+    "label": "彎鉤／T 頭圍束",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "圍束足夠　ψ = 1.0"
+     ],
+     [
+      "1.6",
+      "不足　ψ = 1.6"
+     ]
+    ]
+   },
+   {
+    "id": "dPsiO",
+    "symbol": "ψ_o",
+    "label": "彎鉤／T 頭位置",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "柱核心內／側蓋夠厚　1.0"
+     ],
+     [
+      "1.25",
+      "其他　ψ = 1.25"
+     ]
+    ]
+   },
+   {
+    "id": "dAncBot",
+    "symbol": "—",
+    "label": "底端錨定方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "hook90",
+      "標準彎鉤 90°"
+     ],
+     [
+      "hook180",
+      "標準彎鉤 180°"
+     ],
+     [
+      "head",
+      "擴頭"
+     ],
+     [
+      "straight",
+      "直線"
+     ],
+     [
+      "through",
+      "貫穿續接（不錨定）"
+     ]
+    ]
+   },
+   {
+    "id": "dHBot",
+    "symbol": "h",
+    "label": "底端構材深度",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "dAncTop",
+    "symbol": "—",
+    "label": "頂端錨定方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "hook90",
+      "標準彎鉤 90°"
+     ],
+     [
+      "hook180",
+      "標準彎鉤 180°"
+     ],
+     [
+      "head",
+      "擴頭"
+     ],
+     [
+      "straight",
+      "直線"
+     ],
+     [
+      "through",
+      "貫穿續接（不錨定）"
+     ]
+    ]
+   },
+   {
+    "id": "dHTop",
+    "symbol": "h",
+    "label": "頂端構材深度",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "dAncCov",
+    "symbol": "—",
+    "label": "錨定端保護層",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "dSplice",
+    "symbol": "—",
+    "label": "主筋續接方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "B",
+      "乙級搭接"
+     ],
+     [
+      "A",
+      "甲級搭接（須錯開）"
+     ],
+     [
+      "m1",
+      "機械式續接 第一類"
+     ],
+     [
+      "m2",
+      "機械式續接 第二類"
+     ],
+     [
+      "m3",
+      "機械式續接 第三類"
+     ]
+    ]
+   },
+   {
+    "id": "dStagger",
+    "symbol": "—",
+    "label": "搭接錯開",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "不錯開"
+     ]
+    ]
+   },
+   {
+    "id": "dLapGap",
+    "symbol": "—",
+    "label": "非接觸搭接心距",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   }
+  ],
+  "beam": [
+   {
+    "id": "bw",
+    "symbol": "b_w",
+    "label": "腹板寬",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bh",
+    "symbol": "h",
+    "label": "全深",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bhf",
+    "symbol": "h_f",
+    "label": "翼緣厚",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bL",
+    "symbol": "L",
+    "label": "跨度",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bSpacing",
+    "symbol": "—",
+    "label": "梁中心距",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bEdge",
+    "symbol": "—",
+    "label": "梁位置",
+    "unit": "",
+    "group": "斷面幾何",
+    "options": [
+     [
+      "0",
+      "內梁（雙側翼緣）"
+     ],
+     [
+      "1",
+      "邊梁（單側翼緣）"
+     ],
+     [
+      "2",
+      "單獨 T 梁（§6.3.2.2）"
+     ]
+    ]
+   },
+   {
+    "id": "bSclear",
+    "symbol": "s_w",
+    "label": "邊梁淨距",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bBf",
+    "symbol": "b_f",
+    "label": "單獨 T 梁翼板全寬",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bCover",
+    "symbol": "c_c",
+    "label": "保護層（量至箍筋外緣）",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bDagg",
+    "symbol": "d_agg",
+    "label": "骨材最大粒徑",
+    "unit": "cm",
+    "group": "斷面幾何"
+   },
+   {
+    "id": "bfc",
+    "symbol": "f'_c",
+    "label": "混凝土抗壓強度",
+    "unit": "kgf/cm²",
+    "group": "材料"
+   },
+   {
+    "id": "bfy",
+    "symbol": "f_y",
+    "label": "主筋降伏強度",
+    "unit": "kgf/cm²",
+    "group": "材料",
+    "options": [
+     [
+      "4200",
+      "4200 (SD420／SD420W)"
+     ],
+     [
+      "2800",
+      "2800 (SD280／SD280W)"
+     ],
+     [
+      "5000",
+      "5000 (SD490W)"
+     ],
+     [
+      "5600",
+      "5600 (SD550W)"
+     ]
+    ]
+   },
+   {
+    "id": "bfyt",
+    "symbol": "f_yt",
+    "label": "橫向筋降伏強度",
+    "unit": "kgf/cm²",
+    "group": "材料",
+    "options": [
+     [
+      "4200",
+      "4200 (SD420／SD420W)"
+     ],
+     [
+      "2800",
+      "2800 (SD280／SD280W)"
+     ],
+     [
+      "5000",
+      "5000 (SD490W)"
+     ],
+     [
+      "5600",
+      "5600 (SD550W)"
+     ]
+    ]
+   },
+   {
+    "id": "bEs",
+    "symbol": "E_s",
+    "label": "鋼筋彈性模數",
+    "unit": "kgf/cm²",
+    "group": "材料"
+   },
+   {
+    "id": "becu",
+    "symbol": "ε_cu",
+    "label": "極限壓應變",
+    "unit": "",
+    "group": "材料"
+   },
+   {
+    "id": "bBotSize",
+    "symbol": "—",
+    "label": "底筋號數",
+    "unit": "",
+    "group": "配筋",
+    "options": [
+     [
+      "#4",
+      "#4（d_b = 1.27 cm，A_b = 1.267 cm²）"
+     ],
+     [
+      "#5",
+      "#5（d_b = 1.59 cm，A_b = 1.986 cm²）"
+     ],
+     [
+      "#6",
+      "#6（d_b = 1.91 cm，A_b = 2.865 cm²）"
+     ],
+     [
+      "#7",
+      "#7（d_b = 2.22 cm，A_b = 3.871 cm²）"
+     ],
+     [
+      "#8",
+      "#8（d_b = 2.54 cm，A_b = 5.067 cm²）"
+     ],
+     [
+      "#9",
+      "#9（d_b = 2.87 cm，A_b = 6.469 cm²）"
+     ],
+     [
+      "#10",
+      "#10（d_b = 3.22 cm，A_b = 8.143 cm²）"
+     ],
+     [
+      "#11",
+      "#11（d_b = 3.58 cm，A_b = 10.07 cm²）"
+     ],
+     [
+      "#12",
+      "#12（d_b = 3.94 cm，A_b = 12.19 cm²）"
+     ],
+     [
+      "#14",
+      "#14（d_b = 4.3 cm，A_b = 14.52 cm²）"
+     ],
+     [
+      "#16",
+      "#16（d_b = 5.02 cm，A_b = 19.79 cm²）"
+     ],
+     [
+      "#18",
+      "#18（d_b = 5.73 cm，A_b = 25.79 cm²）"
+     ]
+    ]
+   },
+   {
+    "id": "bNbot",
+    "symbol": "—",
+    "label": "底筋根數",
+    "unit": "根",
+    "group": "配筋"
+   },
+   {
+    "id": "bTopSize",
+    "symbol": "—",
+    "label": "頂筋號數",
+    "unit": "",
+    "group": "配筋",
+    "options": [
+     [
+      "#4",
+      "#4（d_b = 1.27 cm，A_b = 1.267 cm²）"
+     ],
+     [
+      "#5",
+      "#5（d_b = 1.59 cm，A_b = 1.986 cm²）"
+     ],
+     [
+      "#6",
+      "#6（d_b = 1.91 cm，A_b = 2.865 cm²）"
+     ],
+     [
+      "#7",
+      "#7（d_b = 2.22 cm，A_b = 3.871 cm²）"
+     ],
+     [
+      "#8",
+      "#8（d_b = 2.54 cm，A_b = 5.067 cm²）"
+     ],
+     [
+      "#9",
+      "#9（d_b = 2.87 cm，A_b = 6.469 cm²）"
+     ],
+     [
+      "#10",
+      "#10（d_b = 3.22 cm，A_b = 8.143 cm²）"
+     ],
+     [
+      "#11",
+      "#11（d_b = 3.58 cm，A_b = 10.07 cm²）"
+     ],
+     [
+      "#12",
+      "#12（d_b = 3.94 cm，A_b = 12.19 cm²）"
+     ],
+     [
+      "#14",
+      "#14（d_b = 4.3 cm，A_b = 14.52 cm²）"
+     ],
+     [
+      "#16",
+      "#16（d_b = 5.02 cm，A_b = 19.79 cm²）"
+     ],
+     [
+      "#18",
+      "#18（d_b = 5.73 cm，A_b = 25.79 cm²）"
+     ]
+    ]
+   },
+   {
+    "id": "bNtop",
+    "symbol": "—",
+    "label": "頂筋根數",
+    "unit": "根",
+    "group": "配筋"
+   },
+   {
+    "id": "bSpBot",
+    "symbol": "s_b",
+    "label": "底層主筋間距",
+    "unit": "cm",
+    "group": "配筋"
+   },
+   {
+    "id": "bSpTop",
+    "symbol": "s_t",
+    "label": "頂層主筋間距",
+    "unit": "cm",
+    "group": "配筋"
+   },
+   {
+    "id": "bRhoTs",
+    "symbol": "ρ_min",
+    "label": "最小鋼筋比（版）",
+    "unit": "無因次",
+    "group": "配筋"
+   },
+   {
+    "id": "bTieSize",
+    "symbol": "—",
+    "label": "箍筋號數",
+    "unit": "",
+    "group": "配筋",
+    "options": [
+     [
+      "#3",
+      "#3（d_b = 0.953 cm，A_b = 0.7133 cm²）"
+     ],
+     [
+      "#4",
+      "#4（d_b = 1.27 cm，A_b = 1.267 cm²）"
+     ],
+     [
+      "#5",
+      "#5（d_b = 1.59 cm，A_b = 1.986 cm²）"
+     ],
+     [
+      "#6",
+      "#6（d_b = 1.91 cm，A_b = 2.865 cm²）"
+     ],
+     [
+      "#7",
+      "#7（d_b = 2.22 cm，A_b = 3.871 cm²）"
+     ]
+    ]
+   },
+   {
+    "id": "bNlegs",
+    "symbol": "n_legs",
+    "label": "箍筋肢數",
+    "unit": "肢",
+    "group": "配筋"
+   },
+   {
+    "id": "bHoop",
+    "symbol": "—",
+    "label": "外箍型式",
+    "unit": "",
+    "group": "配筋",
+    "options": [
+     [
+      "closed",
+      "一體式閉合箍"
+     ],
+     [
+      "cap",
+      "兩件式（U 形＋封口繫筋）"
+     ]
+    ]
+   },
+   {
+    "id": "bSeismic",
+    "symbol": "—",
+    "label": "耐震等級",
+    "unit": "",
+    "group": "耐震 / 剪力",
+    "options": [
+     [
+      "0",
+      "一般梁（土木401）"
+     ],
+     [
+      "1",
+      "耐震特殊抗彎構材"
+     ]
+    ]
+   },
+   {
+    "id": "bLn",
+    "symbol": "l_n",
+    "label": "淨跨",
+    "unit": "cm",
+    "group": "耐震 / 剪力"
+   },
+   {
+    "id": "bVg",
+    "symbol": "V_g",
+    "label": "重力剪力",
+    "unit": "tf",
+    "group": "耐震 / 剪力"
+   },
+   {
+    "id": "bTheta",
+    "symbol": "θ",
+    "label": "扭矩桁架角",
+    "unit": "°",
+    "group": "耐震 / 剪力"
+   },
+   {
+    "id": "bAl545",
+    "symbol": "—",
+    "label": "受壓區扭矩縱筋折減",
+    "unit": "—",
+    "group": "耐震 / 剪力",
+    "options": [
+     [
+      "0",
+      "不採用（保守）"
+     ],
+     [
+      "1",
+      "採用：受壓區 A_l 減 M_u/(0.9df_y)"
+     ]
+    ]
+   },
+   {
+    "id": "bphit",
+    "symbol": "φ_t",
+    "label": "拉力控制",
+    "unit": "",
+    "group": "耐震 / 剪力"
+   },
+   {
+    "id": "bphiv",
+    "symbol": "φ_v",
+    "label": "剪力 / 扭矩",
+    "unit": "",
+    "group": "耐震 / 剪力"
+   },
+   {
+    "id": "bDeflCase",
+    "symbol": "K",
+    "label": "支承 / 載重型式",
+    "unit": "",
+    "group": "使用性（撓度）",
+    "options": [
+     [
+      "simpleUDL",
+      "簡支・均佈載重"
+     ],
+     [
+      "simplePt",
+      "簡支・中央集中"
+     ],
+     [
+      "fixedUDL",
+      "兩端固定・均佈"
+     ],
+     [
+      "cantUDL",
+      "懸臂・均佈"
+     ]
+    ]
+   },
+   {
+    "id": "bWlim",
+    "symbol": "w_lim",
+    "label": "容許裂縫寬度",
+    "unit": "mm",
+    "group": "使用性（撓度）",
+    "options": [
+     [
+      "0.10",
+      "0.10（水密）"
+     ],
+     [
+      "0.15",
+      "0.15"
+     ],
+     [
+      "0.20",
+      "0.20"
+     ],
+     [
+      "0.25",
+      "0.25"
+     ],
+     [
+      "0.30",
+      "0.30"
+     ]
+    ]
+   },
+   {
+    "id": "bMD",
+    "symbol": "M_D",
+    "label": "靜載彎矩",
+    "unit": "tf·m",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bML",
+    "symbol": "M_L",
+    "label": "活載彎矩",
+    "unit": "tf·m",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bMDn",
+    "symbol": "M_D⁻",
+    "label": "支承負彎矩使用靜載",
+    "unit": "tf·m",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bMLn",
+    "symbol": "M_L⁻",
+    "label": "支承負彎矩使用活載",
+    "unit": "tf·m",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bSustain",
+    "symbol": "—",
+    "label": "持續活載比例",
+    "unit": "",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bXi",
+    "symbol": "ξ",
+    "label": "長期係數",
+    "unit": "",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bLimLive",
+    "symbol": "—",
+    "label": "活載限值 L/",
+    "unit": "",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bLimTotal",
+    "symbol": "—",
+    "label": "總撓度限值 L/",
+    "unit": "",
+    "group": "使用性（撓度）"
+   },
+   {
+    "id": "bdEpoxy",
+    "symbol": "ψ_e",
+    "label": "鋼筋塗布",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "否（未塗布）"
+     ],
+     [
+      "1",
+      "是（環氧樹脂塗布）"
+     ]
+    ]
+   },
+   {
+    "id": "bdLight",
+    "symbol": "λ",
+    "label": "混凝土種類（輕質 λ）",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "常重混凝土（λ = 1.0）"
+     ],
+     [
+      "0.75",
+      "輕質混凝土（λ = 0.75）"
+     ]
+    ]
+   },
+   {
+    "id": "bdWc",
+    "symbol": "w_c",
+    "label": "混凝土單位重",
+    "unit": "kg/m³",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "bdSlurry",
+    "symbol": "—",
+    "label": "混凝土澆置方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "一般澆置"
+     ],
+     [
+      "1",
+      "泥水中灌注（連續壁、場鑄樁）"
+     ]
+    ]
+   },
+   {
+    "id": "bdExcess",
+    "symbol": "—",
+    "label": "超量鋼筋折減",
+    "unit": "",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "bdPsiR",
+    "symbol": "ψ_r／ψ_p",
+    "label": "彎鉤／T 頭圍束",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "圍束足夠　ψ = 1.0"
+     ],
+     [
+      "1.6",
+      "不足　ψ = 1.6"
+     ]
+    ]
+   },
+   {
+    "id": "bdPsiO",
+    "symbol": "ψ_o",
+    "label": "彎鉤／T 頭位置",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "1",
+      "柱核心內／側蓋夠厚　1.0"
+     ],
+     [
+      "1.25",
+      "其他　ψ = 1.25"
+     ]
+    ]
+   },
+   {
+    "id": "bdAnc",
+    "symbol": "—",
+    "label": "支承內錨定方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "hook90",
+      "標準彎鉤 90°"
+     ],
+     [
+      "hook180",
+      "標準彎鉤 180°"
+     ],
+     [
+      "head",
+      "擴頭"
+     ],
+     [
+      "straight",
+      "直線"
+     ]
+    ]
+   },
+   {
+    "id": "bdHc",
+    "symbol": "h_c",
+    "label": "支承柱寬",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "bdAncCov",
+    "symbol": "—",
+    "label": "支承外側保護層",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "bdSplice",
+    "symbol": "—",
+    "label": "主筋續接方式",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "B",
+      "乙級搭接"
+     ],
+     [
+      "A",
+      "甲級搭接（須錯開）"
+     ],
+     [
+      "m1",
+      "機械式續接 第一類"
+     ],
+     [
+      "m2",
+      "機械式續接 第二類"
+     ],
+     [
+      "m3",
+      "機械式續接 第三類"
+     ]
+    ]
+   },
+   {
+    "id": "bdLapTop",
+    "symbol": "—",
+    "label": "頂筋續接位置",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "mid",
+      "跨中續接"
+     ],
+     [
+      "none",
+      "通長不續接"
+     ]
+    ]
+   },
+   {
+    "id": "bdLapBot",
+    "symbol": "—",
+    "label": "底筋續接位置",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "none",
+      "通長（兩端錨入支承）"
+     ],
+     [
+      "sup",
+      "支承附近續接"
+     ]
+    ]
+   },
+   {
+    "id": "bdStagger",
+    "symbol": "—",
+    "label": "搭接錯開",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "不錯開"
+     ]
+    ]
+   },
+   {
+    "id": "bdLapGap",
+    "symbol": "—",
+    "label": "非接觸搭接心距",
+    "unit": "cm",
+    "group": "伸展長度與搭接"
+   },
+   {
+    "id": "bdCut",
+    "symbol": "—",
+    "label": "頂筋截斷點分析",
+    "unit": "",
+    "group": "伸展長度與搭接",
+    "options": [
+     [
+      "0",
+      "不分析（頂筋全數通長）"
+     ],
+     [
+      "1",
+      "分析（均布載重近似）"
+     ]
+    ]
+   },
+   {
+    "id": "bdNcont",
+    "symbol": "—",
+    "label": "頂筋通長根數",
+    "unit": "根",
+    "group": "伸展長度與搭接"
+   }
+  ]
+ }
+}

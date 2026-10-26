@@ -1,25 +1,26 @@
-# StructAudit-AI｜結構計算書 AI 雙重詰問審查系統
+# StructAudit-AI｜結構計算書 AI 詰問審查系統
 
-以「雙 Agent 相互詰問 + 第三 Agent 彙整裁決」的方式審查結構計算書摘要數據，並產出 A4 PDF 審查報告。
+讀取完整的結構計算書 PDF（例如 [rc-member-designer](https://justin121710.github.io/rc-member-designer/) 輸出的計算書），
+由三個模型輪流擔任「原設計工程師／外部審查專家／主任檢核技師」進行多輪詰問審查，
+並對每項疑義提出可直接在 rc-member-designer 調整的解決方案，產出含 LaTeX 算式的 A4 審查報告。
 
 ```
- Excel / CSV ──► parser 前處理 ──► 規則式初篩（位移角、配筋比、D/C、載重組合）
-                                        │
-        ┌───────────────────────────────┘
-        ▼
- Round 1  Agent B 外部審查專家   提出 3～5 項疑義（引用數據＋算式＋規範）
- Round 2  Agent A 原設計工程師   逐項：承認缺失／規範依據抗辯／計算推導抗辯
- Round 3  Agent B 外部審查專家   終審：接受／部分接受／駁回 ＋ Pass／Medium／High
- 彙整     Agent C 主任檢核技師   無虞項目／重大疑義／待複核項目 ＋ 總結論
+ 計算書 PDF ─┬─► 原檔直接附給模型判讀（文字、算式、圖、表格版面）
+            ├─► 擷取文字 → 表頭專案資料（構件、斷面、設計依據…）、計算書引用的條號
+            └─► rc-member-designer 案件檔（選填）→ 各輸入欄位的目前值
+ 規範原文（rc-member-designer specs/）→ 條文索引 data/spec_index.json.gz
+
+ 第 p 輪（p = 1～3，三個模型輪流擔任角色，每輪全新對話、不共用記憶）
+   Round 1  Agent B 外部審查專家   查閱規範原文 → 提出疑義（計算書出處＋LaTeX 算式＋條文原文）
+   Round 2  Agent A 原設計工程師   查閱規範原文 → 承認缺失／規範依據抗辯／計算推導抗辯
+   Round 3  Agent B 外部審查專家   查閱規範原文 → 終審（接受／部分接受／駁回＋低／中／高風險）
+                                  ＋ 1～3 個解決方案（rc-member-designer 欄位、建議值、修正後驗算、改動幅度）
+   彙整     Agent C 主任檢核技師   複核方案、採用改動最小且符合規範者，分類並給本輪結論
+ 綜合裁決  第 1 輪主任技師的模型（全新對話）合併各輪：風險取最嚴、選最小改動方案、寫回調整後案件檔
         │
         ▼
- Streamlit 介面 ──► PDF（WeasyPrint，備援 ReportLab）／Excel／HTML／JSON 下載
+ Streamlit 介面（右側即時顯示）──► PDF（LaTeX 算式）／Excel／JSON／調整後案件檔
 ```
-
-## 線上部署
-
-要讓別人用網址直接開啟（不需安裝 Python），請依 [docs/DEPLOY.md](docs/DEPLOY.md) 部署到 Streamlit Community Cloud（免費）。
-`packages.txt` 已列出 PDF 排版所需的系統套件與中文字型。
 
 ## 快速開始
 
@@ -28,103 +29,155 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-選「使用 AI 模型」並提供 API Key（介面輸入，或環境變數 `GEMINI_API_KEY`／`OPENAI_API_KEY`／`ANTHROPIC_API_KEY`、`.streamlit/secrets.toml`）後，
-系統會用這把 Key 向 Gemini／OpenAI／Claude 查詢可用的文字模型，讓你分別指定 Agent A、B、C 使用的模型。
-有兩家以上的 Key 時，每個 Agent 先選服務商、再選該服務商的模型，三個 Agent 可混用不同服務商。
-Claude 的 Opus 5.5、Opus 5、Sonnet 5.5、Fable 5.1 會開啟伺服器端拒答備援：模型基於安全理由拒答時，由 API 自動改用其他模型接手。
-報告表頭會列出每個 Agent 使用的模型。沒有 Key 時可選「離線示範」走完整流程並產出報表。
-`OPENAI_BASE_URL` 可指向相容 OpenAI API 的服務。
+選「使用 AI 模型」並提供 API Key（介面輸入，或環境變數 `GEMINI_API_KEY`／`ANTHROPIC_API_KEY`／`OPENAI_API_KEY`、
+`.streamlit/secrets.toml`），系統會用這把 Key 向各服務商查詢可用模型。沒有 Key 時可選「離線示範」走完整流程。
+線上部署（不需安裝 Python）見 [docs/DEPLOY.md](docs/DEPLOY.md)。
 
-## 介面與審查對話
+## 審查原則：不預設立場
 
-介面只保留四個步驟：設定（LLM、摘要檔、專案資料、初篩門檻）→ 規則式初篩 → 開始審查 → 結論與下載（PDF／Excel／JSON）。
-按下「開始審查」後，三個 Agent 的發言會依回合即時顯示在「審查對話」：
+- **沒有初篩門檻**：程式不預設任何限值。位移角、配筋比、D/C、圍束筋、強柱弱梁……是否符合規範，
+  一律由 Agent 查閱規範原文後自行判斷。
+- **規範原文來自 rc-member-designer**：`tools/build_spec_index.py` 從 rc-member-designer 的 `specs/`
+  （土木401-112、建築物耐震設計規範、建築物基礎構造設計規範、公路橋梁設計規範、公路橋梁耐震設計規範、下水道設施耐震設計及解說）
+  建立條文索引，每段含條號、規範頁碼與全文（含解說）。
+- **Agent 自行查閱**：計算書中引用的條號自動查出原文；每一回合開始前，該 Agent 再依條號或關鍵字查閱需要的條文。
+  Agent 只能引用查得的原文；輸出的條號逐一比對索引，查無者記入報告「系統紀錄」提醒技師核對。
+- **專案資料取自計算書**：報告表頭（構件、構材類別、斷面、設計依據、計算書程式版本…）直接讀自計算書表頭，
+  介面可修正；Agent 於 Round 1 另會補充擷取計算書中的其他專案資訊。
 
-1. Round 1：外部審查專家（B）的初審意見與逐項質疑（含算式與依據）
-2. Round 2：原設計工程師（A）逐項回覆（承認缺失／規範依據抗辯／計算推導抗辯）
-3. Round 3：外部審查專家（B）逐項終審（接受／部分接受／駁回＋風險等級）
-4. 彙整：主任檢核技師（C）的總結論
+## 讀取 PDF 計算書
 
-每則發言都以標示清楚的段落呈現（疑義說明、檢核算式、引用數據、規範依據；立場、回覆說明、修正方案；判定、風險等級、判定理由、應辦事項），
-立場、判定與風險等級都附白話解釋，各回合標題下也有一句說明這一回合在做什麼。
-Prompt 要求三個 Agent 用完整句子交代「檢查了什麼、數值與限值差多少、為什麼重要、要求什麼」，縮寫第一次出現時加註解釋，
-讓業主、建築師等非結構專業的讀者也能一起閱讀。介面不使用 emoji，Agent 頭像為線條圖示。
+- 計算書 PDF 原檔以附件傳給模型（Gemini、Claude、OpenAI 皆能原生讀 PDF），模型看得到算式、配筋圖與表格版面；
+  若某模型不接受 PDF 附件，自動改用擷取文字並記入系統紀錄。
+- 同時以 pypdf 擷取文字（含頁碼標記），用於條號比對、表頭擷取與離線示範。
+- 仍支援 Excel／CSV 摘要表（只做欄位辨識與統計，不做門檻判定）。
 
-對話紀錄同時保存在 JSON 的 `transcript` 欄位。
+## 角色輪替與記憶隔離
 
-## 與 rc-member-designer 一致的風格
+| 輪次 | Agent A 設計 | Agent B 外審 | Agent C 主任技師 |
+|---|---|---|---|
+| 第 1 輪 | 模型 1 | 模型 2 | 模型 3 |
+| 第 2 輪 | 模型 2 | 模型 3 | 模型 1 |
+| 第 3 輪 | 模型 3 | 模型 1 | 模型 2 |
 
-報表與介面配色沿用 [rc-member-designer](https://github.com/justin121710/rc-member-designer)（RC 構件設計工具）：
+- 三輪下來每個模型都擔任過每個角色一次；審查輪數可選 1、2 或 3 輪（預設 3）。
+- 每一回合前的「查閱規範原文」固定執行、不可關閉：每輪 7 次模型呼叫（查閱 ×3＋Round 1～3＋主任技師），3 輪加綜合裁決共 22 次。
+- 每一輪、每一個角色都建立全新的 client，提示中不含其他輪的任何內容；每次呼叫都是單次請求（不帶歷史對話、
+  不使用伺服器端記憶），所以同一個模型在不同輪次之間不會共用記憶（`tests/test_pipeline.py::test_passes_do_not_share_memory`）。
+- 綜合裁決的保守校正：同一問題的風險取各輪最嚴者；任一輪的中、高風險項目都不得遺漏（遺漏者由系統補回）；
+  總結論不得比任一輪寬鬆。所有校正都記錄在報告「系統紀錄」中。
 
-| 項目 | 對齊內容 |
+### 預設模型（以旗艦模型為主）
+
+| 服務商 | 預設 | 比對方式 |
+|---|---|---|
+| Gemini | Gemini 4 Argon | 依序比對 `gemini-4-argon`、名稱含 `argon`、`gemini-*-pro` |
+| Claude | Claude Opus 5.5 | `claude-opus-5-5`，其次其他 Opus |
+| OpenAI | GPT 6.1-sol | `gpt-6.1-sol`，其次其他 `-sol` 模型 |
+
+預設值是從 API Key 查得的模型清單中比對（同一規則有多個時優先正式版、不取 preview／日期版），各服務商實際的模型 ID 寫法略有差異也能對上；
+清單中都沒有時取清單第一個，介面上可自行改選。三家都有 Key 時，模型 1／2／3 預設為 Gemini／Claude／OpenAI。
+Claude 的 Opus 5.5、Opus 5、Sonnet 5.5、Fable 5.1 會開啟伺服器端拒答備援。
+
+## Round 3 的解決方案與 rc-member-designer
+
+- 外審必須對中、高風險項目提出 1～3 個「確切的解決方案」：以 rc-member-designer 的輸入欄位表達
+  （欄位清單 `data/rcmd_params.json` 由 `tools/build_rcmd_params.js` 從工具的 `index.html` 擷取，含下拉選單可選值），
+  寫出目前值、建議值、以建議值重新驗算的 LaTeX 算式與改動幅度，並指出改動最小者；工具無法調整的問題另寫其他作法。
+- 主任技師複核方案並採用改動最小且符合規範者；綜合裁決再比較各輪方案，選出最終方案。
+- 建議值會檢查是否為該欄位的合法值（例如箍筋號數只能是 #3～#7），不合法者記入系統紀錄。
+- **上傳 rc-member-designer 案件檔（.json，「儲存案件」下載）時**，Agent 會看到每個欄位的目前值與載重組合，
+  系統把最終方案的參數變更寫入「調整後案件檔」；在工具中按「開啟案件」載入、重算，即可確認各檢核項目轉為 OK。
+  以示範計算書為例：原案件有 2 項 NG（圍束筋間距無解、強柱弱梁），調整後案件檔（箍筋 #3→#4、主筋 #8→#9）在工具中重算後 NG 為 0。
+
+## 即時顯示 AI 思考過程
+
+審查進行中，右側上方的進度列「審查進行中｜點開可看 AI 正在思考什麼」點開後，可即時看到每一位 Agent 正在思考的內容
+（每一次 API 呼叫一段，標示輪次、回合、角色與模型）；完成後同一位置保留「AI 思考過程」紀錄，JSON 的 `thoughts` 也有完整內容。
+
+| 服務商 | 取得方式 |
 |---|---|
-| A4 報告（PDF） | 標題列＋兩欄式表頭、「程式版本／雜湊」、粗底線編號章節、「檢核彙總與總判定」表＋總判定框、附註、簽核欄（設計／校核／審核）、頁尾頁碼 |
-| 判定用語 | OK／注意／NG（對應風險等級 Pass／Medium／High） |
-| Excel 報表 | 「檢核表」＋「審查報告(A4)」；表頭 `D9E1F2`、分節 `F2F2F2`、整體判定淺琥珀 `FFF2CC`；Arial |
-| 介面 | 冷灰底白卡、深青強調色 `#0F5F6B`（`.streamlit/config.toml`） |
-| 規範條號 | 初篩條號已對照 rc-member-designer `specs/` 內的規範原文 |
+| Claude | 串流＋`thinking: {type: "adaptive", display: "summarized"}`，讀取 `thinking_delta` |
+| OpenAI | Responses API 串流＋`reasoning: {summary: "auto"}`，讀取 `response.reasoning_summary_text.delta`；`store=False`，伺服器端不保留對話 |
+| Gemini | 串流＋`ThinkingConfig(include_thoughts=True)`，讀取 `thought` 部分 |
 
-PDF 與 Excel 共用 `utils/report_model.py` 的同一份報表資料，內容一致。
+三家提供的都是「思考摘要」，不是完整的內部推理；不支援思考摘要的模型（或 OPENAI_BASE_URL 指向沒有 Responses API 的相容服務）
+會自動改用一般請求，只是沒有思考內容。目前階段顯示在進度列上方（若把階段寫在進度列標題，每次更新都會把使用者點開的進度列收起）。
+
+## 實際花費
+
+每一次 API 呼叫（含查閱規範與格式錯誤重試）都讀取服務商回報的實際用量：
+
+| 服務商 | 讀取欄位 |
+|---|---|
+| Claude | `usage.input_tokens`、`cache_read_input_tokens`、`cache_creation_input_tokens`、`output_tokens`（含思考）；拒答備援時依 `usage.iterations` 分模型計費 |
+| OpenAI | `usage.prompt_tokens`（扣除 `cached_tokens`）、`completion_tokens`（含推理） |
+| Gemini | `usage_metadata.prompt_token_count`（扣除快取）、`candidates_token_count`＋`thoughts_token_count` |
+
+費用＝未快取輸入×輸入單價＋快取命中×快取讀取單價＋快取寫入×快取寫入單價＋輸出×輸出單價，再乘以匯率。
+預設單價（美元／百萬 token）見 `utils/pricing.py`：Claude Opus 5.5 為 4／20（快取讀取 0.2）、Gemini 4 Argon 為 2／10
+（優惠價至 2026-11-30，之後 4／20）、GPT 6.1-sol 為 2／10；介面「計費單價與匯率」可逐一修改，未收錄的模型請自行填寫。
+審查進行中右側即時顯示目前花費，完成後顯示總額與各模型明細；離線示範不計費，token 數為依字數估算。
+
+## 輸出
+
+| 輸出 | 內容 |
+|---|---|
+| PDF 報告 | 表頭（取自計算書）、審查依據、角色輪替表、綜合結論、解決方案（含 rc-member-designer 參數表與 LaTeX 驗算）、各輪審查歷程、檢核彙總與總判定、附註、附錄 A 引用規範條文（直接裁切規範原文 PDF 版面）、簽核欄 |
+| Excel | 「檢核表」＋「審查報告(A4)」，色碼與 rc-member-designer 一致；算式轉為可讀文字 |
+| JSON | 各輪完整輸出、查閱的條文、對話紀錄、系統紀錄 |
+| 調整後案件檔 | 可直接在 rc-member-designer「開啟案件」 |
+| 用量與費用 | 介面即時顯示、報告 2.1 節與 JSON `usage`／`cost`：各模型呼叫次數、輸入／快取／輸出 token 與新台幣費用 |
+
+- **LaTeX 算式**：所有算式欄位都是 LaTeX（KaTeX 語法，與 rc-member-designer 計算書相同寫法）。
+  介面以 KaTeX 顯示；PDF 以 matplotlib mathtext 排成向量 SVG（Computer Modern 字面，WeasyPrint 不執行 JavaScript，無法直接用 KaTeX），
+  ReportLab 備援用高解析 PNG；無法排版的算式改顯示可讀文字，不會讓報告失敗。
+- **附錄 A 規範條文用原文版面**：規範 PDF 的公式是方程式物件，文字擷取會把分子、分母、根號拆成零散字元，
+  無法轉成可靠的 LaTeX；因此附錄依索引記錄的位置，以 pdfium 直接裁切規範原文 PDF 的條文版面，公式與表格與原文一致。
+  原文 PDF 取自環境變數 `SPEC_PDF_DIR`（rc-member-designer 根目錄），或第一次產生報告時從 GitHub 下載並快取於
+  `~/.cache/structaudit/specs/`；取不到時改列擷取文字並註明。
+- **風險等級用中文**：低風險／中風險／高風險；判定用語沿用 rc-member-designer 的 OK／注意／NG。
+
+## 介面
+
+開始審查前設定區置中；按下「開始審查」後改為左右兩欄：左側為設定，右側即時顯示各輪對話（分頁：第 1～3 輪、綜合裁決），
+完成後右側最上方顯示總判定、各項風險與建議方案，以及 PDF／Excel／JSON／調整後案件檔下載與「開啟 rc-member-designer」。
 
 ## 專案結構
 
 ```
 app.py                     Streamlit 介面
-version.py                 程式版本（列於報告表頭）
-.streamlit/config.toml     介面主題色
-orchestrator.py            三回合辯論排程與一致性檢查
+orchestrator.py            角色輪替的多輪審查、規範查閱、一致性與保守校正、綜合裁決
 agents/
-  prompts.py               A／B／C 的 System Prompt 與各回合 User Prompt
-  schemas.py               各回合 JSON 輸出的 Pydantic 模型
-  llm_client.py            OpenAI／Gemini／離線 Mock 封裝、JSON 驗證與重試
+  prompts.py               各角色 System Prompt 與各回合 User Prompt（不預設立場）
+  schemas.py               各回合 JSON 輸出的 Pydantic 模型（中文風險等級、LaTeX 算式、解決方案）
+  llm_client.py            Gemini／Claude／OpenAI／離線 Mock；PDF 附件、預設旗艦模型、JSON 驗證與重試
 utils/
-  parser.py                Excel／CSV 前處理、欄位辨識、規則式初篩
+  calcbook.py              計算書讀取（PDF 原檔＋文字擷取、表頭專案資料；Excel／CSV）
+  specs.py                 規範條文庫（條號查詢、關鍵字查詢、引用比對）
+  rcmd.py                  rc-member-designer 欄位清單、案件檔驗證與套用
+  latex.py                 LaTeX 算式排版（SVG／PNG／純文字）
+  parser.py                Excel／CSV 欄位辨識
   report_model.py          報表資料模型（PDF／HTML／Excel 共用）
   pdf_generator.py         HTML 範本 → PDF（WeasyPrint，備援 ReportLab）
-  xlsx_report.py           Excel 審查報表（檢核表＋審查報告(A4)）
+  xlsx_report.py           Excel 審查報表
 templates/report_template.html
-examples/                  示範資料與產生腳本
+data/spec_index.json.gz    規範條文索引（由 tools/build_spec_index.py 產生）
+data/rcmd_params.json      rc-member-designer 輸入欄位清單（由 tools/build_rcmd_params.js 產生）
+tools/                     上述兩個資料檔的產生程式
+examples/                  示範計算書（柱 C1，含兩項 NG）、案件檔、Excel 摘要表與產生腳本
 tests/                     pytest
 ```
 
-## 輸入資料格式
+### 更新規範索引與欄位清單
 
-一個 Excel 可含多張工作表（或單一 CSV）。系統以欄名辨識數據，欄名可含單位括號，例如：
+rc-member-designer 更新規範或輸入欄位後：
 
-| 標準欄位 | 可辨識的欄名（節錄） | 數值格式 |
-|---|---|---|
-| 樓層 | 樓層、Story、Floor | |
-| 構件 | 構件編號、Member、Label | B1／G3 視為梁，C1 視為柱；或另設「構件類型」欄 |
-| 層間位移角 | 層間位移角、Drift | `0.0042`、`0.42%`、`1/238` |
-| 配筋比 | 配筋比、鋼筋比、主筋比、ρ | `1.8`（%）或 `0.018` |
-| 應力比 | 應力比、D/C、DCR | `0.95` |
-| 載重組合 | 載重組合、Load Combination | `1.2D+1.0L+1.0EX` |
-
-無法辨識的工作表（如設計參數表）仍會以表格形式提供給 Agent 參考。`python examples/make_sample.py` 可重新產生示範檔。
-
-### 規則式初篩預設門檻（介面可調）
-
-| 項目 | 門檻 | 參考 |
-|---|---|---|
-| 層間位移角 | ≤ 0.005 | 建築物耐震設計規範及解說 §2.16.1 |
-| 梁拉力鋼筋比 | ≤ 2.5% | 土木401-112 §18.3.3.1 |
-| 柱主筋比 | 1%～6% | 土木401-112 §18.4.4.1（一般柱 §10.6.1.1 為 1%～8%） |
-| 應力比 D/C | > 1.0 為 NG，> 0.95 為注意 | 土木401-112 §9.5.1.1、§10.5.1.1 |
-| 載重組合 | 檢查 1.4D、1.2D+1.6L、E、W、0.9D 是否存在 | 土木401-112 §5.3.1（表 5.3.1） |
-
-初篩結果會一併提供給三個 Agent，作為辯論的客觀錨點，降低模型憑空推論。
-
-## 設計重點
-
-- **固定回合數**：Orchestrator 依序呼叫四次（缺漏時最多補問一次），不存在開放式迴圈。
-- **結構化輸出**：每回合皆要求 JSON 並以 Pydantic 驗證；格式錯誤時把錯誤訊息回饋給模型重試。
-- **一致性保護**：疑義統一編號 Q1～Q5；A 未回覆者記為「未能抗辯」；B 未判定者列待複核；
-  C 的分類不重不漏（重複者取較嚴重分類、遺漏者依 B 終審風險補入），總結論依分類結果校正。
-  所有修正都記錄在報告「系統紀錄」中。
-- **分角色模型**：介面可為 A／B／C 各選一個模型；程式中為 `ReviewOrchestrator({"A": client_a, "B": client_b, "C": client_c})`。
-- **PDF**：WeasyPrint 依 `templates/report_template.html` 排版；若系統缺少 Pango，自動改用 ReportLab
-  依同一份報表資料產生相同章節的 PDF（會自動尋找系統中文字型嵌入）。WeasyPrint 需要中文字型，Linux 可安裝 `fonts-noto-cjk`。
-- **Excel**：模型輸出以「=」開頭時一律存成文字，不會被 Excel 當成公式執行。
+```bash
+pip install pymupdf                       # 規範 PDF 的字型對照表不完整，需用 PyMuPDF 擷取（僅建索引時需要）
+python tools/build_spec_index.py /path/to/rc-member-designer
+node tools/build_rcmd_params.js /path/to/rc-member-designer/index.html
+```
 
 ## 測試
 
@@ -134,6 +187,9 @@ python -m pytest -q
 
 ## 限制與聲明
 
-- 審查品質取決於輸入摘要的完整度；系統只看得到上傳的表格，看不到模型檔與圖說。
-- LLM 可能引用錯誤條號，Prompt 已要求不確定時標記「條號待查」，仍須由技師核對。
+- 審查依據為送審計算書與規範原文索引；系統看不到結構分析模型檔與圖說。
+- 規範索引以條號切段；提供給 Agent 的是擷取文字，公式可能拆成零散字元（Agent 依上下文判讀），報告附錄則為原文版面，仍須由技師對照原文。
+- 建議方案的數值須在 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，才能作為修正依據。
+- 每輪 7 次模型呼叫（Round 1～3 前各 1 次查閱規範＋Round 1～3＋主任技師），3 輪加綜合裁決共 22 次（格式錯誤重試另計），每次都附上計算書 PDF；想降低費用可改為 1～2 輪。
+- 費用以預設單價計算（Gemini 4 Argon、GPT 6.1-sol 的單價取自第三方整理，未經官方確認），實際金額以各服務商帳單為準；單價與匯率可在介面修改。
 - 本系統為審查輔助工具，產出報告不得取代依法辦理之結構簽證或外審。

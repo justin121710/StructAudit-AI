@@ -1,3 +1,6 @@
+import io
+
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -17,48 +20,20 @@ def test_map_columns_with_units_and_aliases():
     assert m["load_combo"] == "Load Combination"
 
 
-def test_drift_formats_are_normalised():
-    df = pd.DataFrame({"樓層": ["3F", "2F", "1F"], "位移角": ["1/250", "0.45%", "0.0052"]})
-    s = parse_structural_file(_csv(df), filename="drift.csv")
-    hits = [f for f in s.findings if "位移角" in f.item]
-    assert [f.item for f in hits] == ["層間位移角 1F"]
-
-
-def test_rebar_ratio_by_member_kind():
-    df = pd.DataFrame({
-        "構件編號": ["B1", "C1", "C2"],
-        "構件類型": ["梁", "柱", "柱"],
-        "配筋比(%)": [2.8, 0.8, 2.0],
-    })
-    s = parse_structural_file(_csv(df), filename="members.csv")
-    items = {f.item for f in s.findings}
-    assert "梁配筋比 B1" in items
-    assert "柱主筋比 C1" in items
-    assert not any("C2" in i for i in items)
-
-
-def test_missing_load_combinations_detected():
-    df = pd.DataFrame({"載重組合": ["1.4D", "1.2D+1.6L", "1.2D+1.0L+1.0EX", "0.9D+1.0EY"]})
-    s = parse_structural_file(_csv(df), filename="combo.csv")
-    details = [f.detail for f in s.findings]
-    assert any("風力" in d for d in details)
-    assert not any("地震" in d for d in details)
-    assert not any("0.9D" in d for d in details)
-
-
-def test_dcr_levels_and_custom_limits():
-    df = pd.DataFrame({"構件": ["G1", "G2", "G3"], "D/C": [1.02, 0.97, 0.5]})
+def test_no_preset_thresholds():
+    """摘要表只做欄位辨識與統計，不做任何門檻判定（由 Agent 查閱規範後判斷）。"""
+    df = pd.DataFrame({"構件": ["G1", "G2"], "D/C": [1.30, 0.5]})
     s = parse_structural_file(_csv(df), filename="dcr.csv")
-    assert [(f.level, f.item) for f in s.findings] == [("High", "應力比 G1"), ("Medium", "應力比 G2")]
-    s2 = parse_structural_file(_csv(df), filename="dcr.csv", limits={"dcr_max": 1.05, "dcr_warn": 1.0})
-    assert [f.item for f in s2.findings] == ["應力比 G1"]
+    assert not hasattr(s, "findings")
+    text = s.to_prompt_text()
+    assert "初篩" not in text and "最大 1.3" in text
 
 
 def test_sample_workbook_and_prompt_text():
     s = parse_structural_file("examples/sample_structure.xlsx")
     assert len(s.sheets) == 5
     text = s.to_prompt_text({"案名": "測試案"})
-    assert "測試案" in text and "規則式初篩" in text
+    assert "測試案" in text and "層間位移角" in text
 
 
 def test_unsupported_format():
@@ -68,10 +43,6 @@ def test_unsupported_format():
 
 def test_blank_cells_in_text_columns():
     """空白格不得造成解析失敗（pandas 3 的 astype(str) 會保留 NaN）。"""
-    import io
-
-    import numpy as np
-
     df = pd.DataFrame({
         "樓層": [np.nan, "2F", "3F"],
         "構件": ["B1", np.nan, "C1"],
@@ -82,7 +53,5 @@ def test_blank_cells_in_text_columns():
     buf = io.BytesIO()
     df.to_excel(buf, index=False)
     s = parse_structural_file(buf.getvalue(), filename="blank.xlsx")
-    items = [f.item for f in s.findings]
-    assert "應力比 2F" in items  # 構件空白時只顯示樓層
-    assert not any("nan" in i for i in items)
-    assert any(f.check == "combo" for f in s.findings)
+    assert s.sheets[0].mapped["dcr"] == "D/C"
+    assert "nan" not in s.to_prompt_text().split("|")[0]
