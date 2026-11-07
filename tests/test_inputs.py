@@ -1,6 +1,7 @@
 """計算書讀取、規範條文庫、LaTeX 排版、rc-member-designer 案件檔。"""
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -106,3 +107,46 @@ def test_clause_image_from_original_spec_pdf():
     png = clause_png("01", "6.2.5.1")
     assert png and png[:4] == b"\x89PNG"
     assert clause_png("01", "99.9.9") is None
+
+
+# ---------- 工具整合 M4：rc-member-designer 從 Midas 匯入之內力來源 ----------
+MIDAS_PDF = Path(__file__).resolve().parent.parent / "examples" / "sample_P1_midas_calc.pdf"
+MIDAS_CASE = MIDAS_PDF.with_name("sample_P1_midas_case.json")
+
+
+def test_load_source_from_calc_book():
+    c = read_calcbook(MIDAS_PDF)
+    assert c.facts["構件"] == "P1_COL"
+    assert c.facts["內力來源"] == "Midas Civil 結果表格匯入；結構群組 P1_COL；元素 101to103；模型 midas_pier.mct"
+    assert "cLCB2 @E102-J" in c.load_source and "5.1" not in c.load_source
+    # 沒有內力來源的計算書不加此欄
+    assert "內力來源" not in read_calcbook(SAMPLE_PDF).facts
+
+
+def test_load_source_summary_flags_edits_and_plates():
+    from utils.calcbook import load_source_summary, load_source_text
+    pages = ["5. 控制組合檢核\n內力來源\n本表載重組合由 Midas Civil 結果表格匯入：構件結構群組 S1_DECK、元素 301to302。"
+             "版內力（Plate Force）取 x 向 Wood-Armer 設計彎矩。匯入後載重表已修改，以表內數值為準。\n6. 剪力與扭矩設計\n其他"]
+    t = load_source_text(pages)
+    assert "其他" not in t
+    s = load_source_summary(t)
+    assert "Wood-Armer" in s and "S1_DECK" in s and "已手動修改" in s
+    assert load_source_text(["內力來源\n無關文字"]) == ""
+
+
+def test_case_load_source_and_edit_detection():
+    case = rcmd.load_case(open(MIDAS_CASE, "rb").read())
+    text = rcmd.catalog_text("pylon", case)
+    assert "載重來源（案件檔 loadsrc）" in text and "結構群組 P1_COL" in text and "載重表與匯入結果一致" in text
+    assert "控制條件 P_u 最大：cLCB2（E102-J，830）" in text and "載重列 cLCB2 @E102-J ← E102-J" in text
+    case["loads"][0]["Pu"] += 1
+    assert "匯入後載重表已手動修改" in rcmd.load_source_text(case)
+    assert rcmd.load_source_text(rcmd.load_case(open(SAMPLE_CASE, "rb").read())) == ""
+    # 審查後寫回之案件檔保留載重來源
+    new, applied, _ = rcmd.apply_changes(case, [("tieSize", "#5")])
+    assert new["loadsrc"]["pylon"]["group"] == "P1_COL" and applied
+
+
+def test_reviewer_prompt_mentions_load_source():
+    from agents import prompts as P
+    assert "內力來源" in P.AGENT_B_SYSTEM and "包絡組合" in P.AGENT_B_SYSTEM

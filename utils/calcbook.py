@@ -37,6 +37,7 @@ class CalcBook:
     facts: dict[str, str] = field(default_factory=dict)  # 表頭專案資料（項目 → 內容）
     pdf: bytes | None = field(default=None, repr=False)
     table: StructuralSummary | None = field(default=None, repr=False)
+    load_source: str = ""  # 「內力來源」段落（rc-member-designer 從 Midas 匯入載重時列出；工具整合 M4）
 
     @property
     def n_pages(self) -> int:
@@ -135,6 +136,44 @@ def header_facts(first_page: str) -> tuple[str, dict[str, str]]:
     return title, facts
 
 
+# 「內力來源」段落結束於下一個章節標題（5.1、6. …）或附註、檢核彙總
+_SECTION_END = re.compile(r"^\s*(\d+(\.\d+)*\s*[.．、]?\s*\S|附註|檢核彙總)")
+
+
+def load_source_text(pages: list[str]) -> str:
+    """擷取 rc-member-designer 計算書的「內力來源」段落（自 Midas Civil 匯入載重時才有），最多 4000 字。"""
+    lines = "\n".join(pages).splitlines()
+    for i, x in enumerate(lines):
+        if x.strip() == "內力來源" and any("Midas" in y for y in lines[i + 1:i + 3]):
+            out = []
+            for y in lines[i + 1:]:
+                if _SECTION_END.match(y):
+                    break
+                out.append(y)
+            return "\n".join(out).strip()[:4000]
+    return ""
+
+
+def load_source_summary(text: str) -> str:
+    """內力來源摘要（報告表頭用）：來源程式、結構群組、元素、模型檔，以及匯入後是否修改。"""
+    if not text:
+        return ""
+    flat = re.sub(r"\s*\n\s*", "", text)
+    parts = ["Midas Civil 結果表格匯入" + ("（版內力，Wood-Armer）" if "Wood-Armer" in flat else "")]
+    m = re.search(r"結構群組\s*([^\s、，,。]+)", flat)
+    if m:
+        parts.append(f"結構群組 {m.group(1)}")
+    m = re.search(r"元素\s*([0-9][0-9to by]*)", flat)
+    if m:
+        parts.append(f"元素 {m.group(1).strip()}")
+    m = re.search(r"模型\s*(\S+?\.mct)", flat)
+    if m:
+        parts.append(f"模型 {m.group(1)}")
+    if "已修改" in flat:
+        parts.append("匯入後載重表已手動修改")
+    return "；".join(parts)
+
+
 def read_calcbook(file: str | Path | bytes, filename: str | None = None) -> CalcBook:
     """讀取計算書：PDF 或 Excel／CSV。file 可為路徑或 bytes（bytes 需提供 filename）。"""
     if isinstance(file, (str, Path)):
@@ -150,7 +189,10 @@ def read_calcbook(file: str | Path | bytes, filename: str | None = None) -> Calc
         if not any(p.strip() for p in pages):
             raise ValueError("PDF 沒有可擷取的文字（可能是掃描影像）；仍可由支援 PDF 的模型直接判讀，但離線示範無法使用")
         title, facts = header_facts(pages[0] if pages else "")
-        return CalcBook(filename, sha, "pdf", title=title, pages=pages, facts=facts, pdf=data)
+        src = load_source_text(pages)
+        if src:
+            facts["內力來源"] = load_source_summary(src)
+        return CalcBook(filename, sha, "pdf", title=title, pages=pages, facts=facts, pdf=data, load_source=src)
     summary = parse_structural_file(data, filename=filename)
     facts = {}
     for name, df in summary.frames.items():  # 「項目／內容」兩欄的參數表

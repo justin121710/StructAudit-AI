@@ -52,6 +52,18 @@ streamlit run app.py
 - 同時以 pypdf 擷取文字（含頁碼標記），用於條號比對、表頭擷取與離線示範。
 - 仍支援 Excel／CSV 摘要表（只做欄位辨識與統計，不做門檻判定）。
 
+## 內力來源（與 Midas Civil 串接）
+
+rc-member-designer 以「從 Midas 匯入」取得載重時，計算書會有「內力來源」段落（結構群組、元素、每列對應的元素端點、控制條件），
+案件檔也記錄同樣資料（`loadsrc`）。本系統會：
+
+- 從計算書擷取「內力來源」，摘要列入報告表頭（`utils/calcbook.py`）；
+- 把案件檔的載重來源、控制條件與「匯入後載重是否被手動修改」交給 Agent（`utils/rcmd.py`）；
+- 外審 Agent 一併核對控制組合是否漏挑、是否誤用包絡組合或單一工況、正負號與軸向、頂底配對、柱面折減、$P_D$ 來源、版的 Wood-Armer 方向與膜力。
+
+示範檔：`examples/sample_P1_midas_calc.pdf`、`sample_P1_midas_case.json`（由 `examples/make_sample_midas.js` 產生）。
+四個工具的串接流程見 rc-member-designer 的 [docs/INTEGRATION.md](https://github.com/justin121710/rc-member-designer/blob/main/docs/INTEGRATION.md)。
+
 ## 角色輪替與記憶隔離
 
 | 輪次 | Agent A 設計 | Agent B 外審 | Agent C 主任技師 |

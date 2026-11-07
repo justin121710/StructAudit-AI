@@ -70,6 +70,54 @@ def catalog_text(module: str | None, case: dict | None = None) -> str:
         if loads:
             lines.append("載重組合（案件檔，已乘載重因數；單位 tf、tf·m）：")
             lines += [f"- {json.dumps(row, ensure_ascii=False)}" for row in loads]
+        src = load_source_text(case, mod)
+        if src:
+            lines.append(src)
+    return "\n".join(lines)
+
+
+LOADS_KEY_FIELDS = ["Pu", "Mux", "Muy", "Vux", "Vuy", "Tu", "Mpos", "Mneg", "Vu"]
+
+
+def loads_key(loads: list) -> str:
+    """與 rc-member-designer core/midas-io.js loadsKey 相同：判斷匯入後載重表是否被修改。"""
+    def f3(v):
+        x = float(v)
+        return f"{0.0 if x == 0 else x:.3f}"
+    rows = []
+    for r in loads or []:
+        rows.append("|".join([str(r.get("name", "")), str(r.get("pos") or "")]
+                             + ["" if r.get(k) is None else f3(r[k]) for k in LOADS_KEY_FIELDS]))
+    return ";".join(rows)
+
+
+def load_source_text(case: dict | None, module: str | None = None) -> str:
+    """案件檔的載重來源（loadsrc，rc-member-designer 從 Midas 匯入時記錄）：給 Agent 核對控制組合的依據。"""
+    if not case:
+        return ""
+    mod = module or case_module(case)
+    src = (case.get("loadsrc") or {}).get(mod)
+    if not isinstance(src, dict):
+        return ""
+    loads = case.get("bloads" if mod == "beam" else "loads") or []
+    edited = loads_key(loads) != src.get("key", "")
+    kind = "版內力（Plate Force），" + f"{src.get('dir', 'x')} 向 Wood-Armer" if src.get("kind") == "plate" else "Beam Force"
+    lines = [f"載重來源（案件檔 loadsrc）：Midas Civil {kind}；內力表 {src.get('table') or '貼上'}（單位 {src.get('units', '')}）"
+             + (f"；模型 {src['mct']}" if src.get("mct") else "")
+             + (f"；結構群組 {src['group']}" if src.get("group") else "") + f"；元素 {src.get('elems', '')}"
+             + (f"；{src['tb']}" if src.get("tb") else "")
+             + ("；列出全部勾選組合" if src.get("mode") == "all" else "；只列控制組合")
+             + (f"；P_D 取自載重 {src['pd']}" if src.get("pd") else "")
+             + ("；x、y 已對調" if src.get("swap") else "")
+             + ("" if src.get("sagPos", True) else "；Midas 正彎矩視為上緣受拉")
+             + ("。匯入後載重表已手動修改，以案件檔載重為準。" if edited else "。載重表與匯入結果一致。")]
+    for c in src.get("ctrl") or []:
+        lines.append(f"- 控制條件 {c.get('why', '')}：{c.get('load', '')}（{c.get('tag', '')}，{c.get('v', '')}）")
+    for r in src.get("rows") or []:
+        pos = {"top": "頂", "bot": "底"}.get(r.get("pos", ""), "")
+        lines.append(f"- 載重列 {r.get('name', '')}{('（' + pos + '）') if pos else ''} ← {r.get('tag', '')}")
+    for w in src.get("warn") or []:
+        lines.append(f"- 匯入時警示：{w}")
     return "\n".join(lines)
 
 
