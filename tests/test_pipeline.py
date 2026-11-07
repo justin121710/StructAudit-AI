@@ -91,6 +91,10 @@ def test_mock_pipeline_with_role_rotation(session):
     assert session.final.items[0].source_ids == ["P1-Q1", "P2-Q1", "P3-Q1"]
     # 最終方案寫回 rc-member-designer 案件檔
     assert session.adjusted_case["values"]["tieSize"] == "#4" and session.adjusted_case["values"]["barSize"] == "#9"
+    # 案件檔配對、審查紀錄（待重算）、載重不被改寫
+    assert session.project_info["案件檔配對"].startswith("已核對")
+    assert session.adjusted_case["review"]["status"] == "pending-recalc"
+    assert {c["id"] for c in session.adjusted_case["review"]["changes"]} >= {"tieSize", "barSize"}
     assert "$$" in next(m.body for m in session.transcript if m.stage == "round1" and m.title.startswith("Q1"))
     json.dumps(session.to_dict(), ensure_ascii=False)
 
@@ -361,3 +365,12 @@ def test_cost_uses_model_prices_and_fx():
     assert default_price("gemini-4-argon", date(2026, 12, 1)).input == 4.0  # 優惠期後標準價
     custom = summarize(usage[:1], {"claude-opus-5-5": Price(1, 1, 1, 1)}, fx=30)
     assert custom.usd == pytest.approx(2.1)  # 使用者自訂單價優先
+
+
+def test_mismatched_case_is_not_written(calc):
+    """計算書（C1）與案件檔（P1）不是同一版：審查照做，但不寫出調整後案件檔"""
+    other = load_case(open("examples/sample_P1_midas_case.json", "rb").read())
+    s = ReviewOrchestrator(MockClient, passes=1).run(calc, other, "sample_P1_midas_case.json")
+    assert s.project_info["案件檔配對"].startswith("不符")
+    assert s.adjusted_case is None
+    assert any("未寫入調整後案件檔" in n for n in s.notes)

@@ -138,7 +138,7 @@ def test_case_load_source_and_edit_detection():
     case = rcmd.load_case(open(MIDAS_CASE, "rb").read())
     text = rcmd.catalog_text("pylon", case)
     assert "載重來源（案件檔 loadsrc）" in text and "結構群組 P1_COL" in text and "載重表與匯入結果一致" in text
-    assert "控制條件 P_u 最大：cLCB2（E102-J，830）" in text and "載重列 cLCB2 @E102-J ← E102-J" in text
+    assert "篩選依據 P_u 最大：cLCB2（E102-J，830）" in text and "極值篩選" in text and "載重列 cLCB2 @E102-J ← E102-J" in text
     case["loads"][0]["Pu"] += 1
     assert "匯入後載重表已手動修改" in rcmd.load_source_text(case)
     assert rcmd.load_source_text(rcmd.load_case(open(SAMPLE_CASE, "rb").read())) == ""
@@ -150,3 +150,52 @@ def test_case_load_source_and_edit_detection():
 def test_reviewer_prompt_mentions_load_source():
     from agents import prompts as P
     assert "內力來源" in P.AGENT_B_SYSTEM and "包絡組合" in P.AGENT_B_SYSTEM
+
+
+# ---------- 四專案流程改善：交換一致性（指紋 v2、寫回驗證、配對核對） ----------
+def test_loads_key_v2_matches_shared_vectors():
+    V = json.load(open(Path(__file__).parent / "data" / "loads_key_vectors.json", encoding="utf-8"))
+    for c in V["cases"]:
+        assert rcmd.loads_key(c["loads"]) == c["key"], c["note"]
+    # 捨入邊界：v1（toFixed 對 Python 格式）會不一致，v2 一致
+    assert rcmd._key_num(1.0625) == "1063" and rcmd._key_num(-1.0625) == "-1062" and rcmd._key_num(-0.0) == "0"
+    assert rcmd._key_num(float("nan")) == "NaN" and rcmd._key_num(1e20) == "OV"
+    # 舊案件的 v1 鍵仍以 v1 比對
+    a = [{"name": "A", "Pu": 1, "Mux": 2}]
+    assert not rcmd.loads_edited(a, rcmd.loads_key_v1(a)) and not rcmd.loads_edited(a, rcmd.loads_key(a))
+    assert rcmd.loads_edited([{"name": "A", "Pu": 1, "Mux": 2.1}], rcmd.loads_key(a))
+
+
+def test_write_back_rejects_invalid_and_keeps_loads():
+    case = rcmd.load_case(open(MIDAS_CASE, "rb").read())
+    assert "不是有限" in rcmd.validate_change("pylon", "nB", "nan", case)
+    assert "不是有限" in rcmd.validate_change("pylon", "nB", "inf", case)
+    assert "必須大於 0" in rcmd.validate_change("pylon", "fc", "-280", case)
+    assert "不是柱斷面模組的欄位" in rcmd.validate_change("pylon", "bw", "60", case)
+    assert rcmd.validate_change("pylon", "fc", "350", case) == ""
+    new, applied, rejected = rcmd.apply_changes(case, [("fc", "350"), ("tieSize", "#5"), ("bw", "60"), ("nB", "nan")],
+                                                source="P1.pdf", pairing="已核對")
+    assert len(applied) == 2 and len(rejected) == 2
+    assert new["loads"] == case["loads"] and new["loadsrc"] == case["loadsrc"]      # 載重與來源不被改寫
+    rv = new["review"]
+    assert rv["status"] == "pending-recalc" and rv["pairing"] == "已核對" and rv["source"] == "P1.pdf"
+    assert [c["id"] for c in rv["changes"]] == ["fc", "tieSize"]
+    assert "回 Midas 重分析" in rv["analysis"]          # f'c 屬「材料」群組：分析可能過期
+
+
+def test_pairing_pdf_and_case():
+    from utils import pairing
+    calc = read_calcbook(MIDAS_PDF)
+    case = rcmd.load_case(open(MIDAS_CASE, "rb").read())
+    p = pairing.check(calc, case)
+    assert p.status == pairing.MATCH and [c[1] for c in p.checks] == [pairing.MATCH] * 4
+    # review 區塊與存檔時間不影響輸入雜湊（與 rc-member-designer inputHash 同規則）
+    case2 = dict(case, review={"by": "x", "changes": []}, saved="2030-01-01")
+    assert pairing.check(calc, case2).status == pairing.MATCH
+    # 輸入改了一個值 → 不是同一版
+    case3 = json.loads(json.dumps(case)); case3["values"]["tieSize"] = "#5"
+    assert pairing.check(calc, case3).status == pairing.MISMATCH
+    # 不同構件的計算書
+    p4 = pairing.check(read_calcbook(SAMPLE_PDF), case)
+    assert p4.status == pairing.MISMATCH and "構件名稱" in p4.summary
+    assert pairing.check(calc, None).status == pairing.UNKNOWN

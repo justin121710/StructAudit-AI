@@ -24,7 +24,7 @@ from typing import Callable
 from agents import prompts as P
 from agents import schemas as S
 from agents.llm_client import Attachment, LLMClient, Usage, schema_text
-from utils import rcmd
+from utils import pairing, rcmd
 from utils.calcbook import CalcBook
 from utils.latex import split_lines
 from utils.pricing import USD_TWD, CostSummary, Price, summarize
@@ -360,6 +360,12 @@ class ReviewOrchestrator:
             fx=fx,
         )
         self._calc, self._case = calc, case
+        self._pair = pairing.check(calc, case)
+        if case:
+            session.project_info["案件檔配對"] = f"{self._pair.status}：{self._pair.summary}"
+            session.calc["pairing"] = {"status": self._pair.status, "checks": self._pair.checks}
+            if self._pair.status != pairing.MATCH:
+                session.notes.append(f"案件檔配對{self._pair.status}：{self._pair.summary}")
         self._module = (rcmd.case_module(case) if case else None) or calc.module or "pylon"
         self._scope = scope_of(calc.basis)
         self._att = [Attachment(calc.filename, calc.pdf)] if calc.pdf else []
@@ -761,7 +767,14 @@ class ReviewOrchestrator:
                 chosen[c.param_id] = (c.proposed, it.title)
         if not chosen:
             return
-        new, applied, rejected = rcmd.apply_changes(self._case, [(k, v) for k, (v, _) in chosen.items()])
+        if self._pair.status == pairing.MISMATCH:   # 修正可能寫到另一版案件：不寫出，請使用者上傳同一版
+            s.notes.append("計算書與案件檔不是同一版輸入（" + self._pair.summary + "），未寫入調整後案件檔；"
+                           "請上傳與計算書同一版的案件檔後再審查，或依報告的建議值自行在工具中修改。")
+            s.adjusted_rejected = [f"{k} → {v}：計算書與案件檔不是同一版，未寫入" for k, (v, _) in chosen.items()]
+            return
+        new, applied, rejected = rcmd.apply_changes(self._case, [(k, v) for k, (v, _) in chosen.items()],
+                                                    source=self._calc.filename if self._calc else "",
+                                                    pairing=self._pair.status)
         s.adjusted_case, s.adjusted_applied, s.adjusted_rejected = new, applied, rejected
         for r in rejected:
             s.notes.append(f"調整後案件檔未套用：{r}")

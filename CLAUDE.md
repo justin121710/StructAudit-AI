@@ -11,7 +11,10 @@
 - 規範條文索引 `data/spec_index.json.gz` 由 `tools/build_spec_index.py` 從 rc-member-designer 的 `specs/` 產生。
 - 計算書表頭欄位（`utils/calcbook.py` 的 `RCMD_HEADER_KEYS`）對應 rc-member-designer 計算書的 `rpHead`。
 - 「內力來源」（工具整合 M4）：`utils/calcbook.py` 擷取計算書的「內力來源」段落，`utils/rcmd.py` 讀案件檔 `loadsrc`；
-  `loads_key()` 必須與 rc-member-designer `core/midas-io.js` 的 `loadsKey` 結果相同（判斷匯入後是否手動修改）。
+  `loads_key()`（指紋 v2）必須與 rc-member-designer `core/midas-io.js` 的 `loadsKey` 結果相同（判斷匯入後是否手動修改）：
+  `tests/data/loads_key_vectors.json` 與該工具 `tests/fixtures/loads_key_vectors.json` 必須是同一份，規則改了兩邊一起改。
+- 配對核對（`utils/pairing.py`）：`case_input_hash` 必須與 rc-member-designer `inputHash` 相同（去掉 saved、members、conf、review 後的 JSON 雜湊）；
+  不符時 `orchestrator._apply_case` 不寫出調整後案件檔。寫回只改 `values`，並附 `review` 區塊（契約見 rc-member-designer `docs/INTEGRATION.md` §3.3～3.5）。
   rc-member-designer 改了該段文字或 `loadsrc` 欄位時，同步修改這裡並以 `examples/make_sample_midas.js` 重產示範檔。
 - 四個工具的串接規格見 rc-member-designer `docs/INTEGRATION.md`。
 

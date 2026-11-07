@@ -18,6 +18,7 @@ import streamlit as st
 from agents.llm_client import PROVIDER_LABEL, MockClient, create_client, default_model, list_models
 from orchestrator import ROLES, DialogueMessage, ReviewOrchestrator, ReviewSession
 from utils import rcmd
+from utils import pairing
 from utils.calcbook import CalcBook, read_calcbook
 from utils.pdf_generator import generate_pdf
 from utils.pricing import USD_TWD, Price, default_price, summarize, twd
@@ -354,6 +355,16 @@ with left:
                 project_info[k] = st.text_input(k, v, key=f"fact_{calc.sha256[:10]}_{k}")
             if case:
                 st.caption(f"案件檔：{case_name}（{rcmd.MODULE_LABEL[rcmd.case_module(case)]}模組）")
+    if calc and case:   # 資料完整性：PDF 與案件檔是否同一版（不呼叫 AI）
+        pair = pairing.check(calc, case)
+        msg = f"**案件檔配對{pair.status}**：{pair.summary}"
+        (st.success if pair.status == pairing.MATCH else st.error if pair.status == pairing.MISMATCH else st.warning)(msg)
+        if pair.status == pairing.MISMATCH:
+            st.caption("不是同一版時，審查建議不會寫入調整後案件檔。請上傳與計算書同一版的案件檔（工具「儲存案件」）。")
+        src = rcmd.load_source_text(case)
+        if src:
+            with st.expander("內力來源（案件檔 loadsrc）"):
+                st.text(src)
 
     need_models = mode == MODE_AI and len(slots) < 3
     st.button("開始審查", type="primary", width="stretch", disabled=calc is None or need_models, key="run",

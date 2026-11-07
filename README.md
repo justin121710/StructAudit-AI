@@ -61,6 +61,10 @@ rc-member-designer 以「從 Midas 匯入」取得載重時，計算書會有「
 - 把案件檔的載重來源、控制條件與「匯入後載重是否被手動修改」交給 Agent（`utils/rcmd.py`）；
 - 外審 Agent 一併核對控制組合是否漏挑、是否誤用包絡組合或單一工況、正負號與軸向、頂底配對、柱面折減、$P_D$ 來源、版的 Wood-Armer 方向與膜力。
 
+- **PDF 與案件檔配對**（`utils/pairing.py`）：以案件檔重算 rc-member-designer 計算書表頭的「輸入 SHA-256」，並核對模組、構件名稱、內力來源群組。上傳後立即顯示（不呼叫 AI）；**不是同一版時不寫出調整後案件檔**，避免修正寫到另一版。
+- **寫回驗證**：建議值必須屬於案件所屬模組、是有限數值，尺寸／強度／根數須大於 0；只改輸入欄位，不改載重與內力來源。調整後案件檔另含 `review` 區塊（修改清單、狀態「待重算」、可能過期的分析），rc-member-designer 開啟時會通知並以新輸入重算——**建議值已寫入不等於設計已通過**。
+- **載重指紋 v2**：與 rc-member-designer 同一規則，以 `tests/data/loads_key_vectors.json` 驗證（與該工具 `tests/fixtures/` 的同名檔相同）。
+
 示範檔：`examples/sample_P1_midas_calc.pdf`、`sample_P1_midas_case.json`（由 `examples/make_sample_midas.js` 產生）。
 四個工具的串接流程見 rc-member-designer 的 [docs/INTEGRATION.md](https://github.com/justin121710/rc-member-designer/blob/main/docs/INTEGRATION.md)。
 
