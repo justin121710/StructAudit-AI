@@ -65,27 +65,31 @@ st.markdown("""<style>
 .alert{border-radius:6px;padding:7px 12px;margin:4px 0;font-size:13.5px;border:1px solid}
 .a-bad{background:#F8E6E3;border-color:rgba(176,58,46,.35)}
 .a-warn{background:#FBF0DF;border-color:rgba(154,94,16,.32)}
-.a-ok{background:#fff;border-color:#D8DEE5}
+.a-ok{background:#fff;border-color:#DCE0E5}
 .vcard{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:#fff;
-  border:1px solid #D8DEE5;border-left:5px solid #1E7A44;border-radius:6px;padding:10px 16px;margin:2px 0 8px}
+  border:1px solid #DCE0E5;border-left:5px solid #1E7A44;border-radius:6px;padding:10px 16px;margin:2px 0 8px}
 .vcard.bad{border-left-color:#B03A2E} .vcard.warn{border-left-color:#9A5E10}
-.vcard .vk{font-size:12px;color:#56636F;margin-bottom:1px}
+.vcard .vk{font-size:12px;color:#4B5563;margin-bottom:1px}
 .vcard .vv{font-size:19px;font-weight:700;color:#151C24;display:flex;align-items:center;gap:8px}
 .vchip{font-size:12px;font-weight:700;border-radius:10px;padding:1px 9px;border:1px solid}
 .vchip.bad{color:#B03A2E;background:#F8E6E3;border-color:rgba(176,58,46,.35)}
 .vchip.warn{color:#9A5E10;background:#FBF0DF;border-color:rgba(154,94,16,.32)}
 .vchip.ok{color:#1E7A44;background:#E6F2EA;border-color:rgba(30,122,68,.3)}
-.vstats{display:flex;gap:18px;font-size:13px;color:#56636F}
+.vstats{display:flex;gap:18px;font-size:13px;color:#4B5563}
 .vstats b{display:block;font-size:16px;color:#151C24}
-.stage-now{font-size:13px;color:#0B4D57;margin:0 0 4px}
-.stage-now:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#0F5F6B;
+.stage-now{font-size:13px;color:#17666C;margin:0 0 4px}
+.stage-now:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:#1E7F86;
   margin-right:8px;vertical-align:1px;animation:pulse 1.2s ease-in-out infinite}
 @keyframes pulse{50%{opacity:.25}}
-.thought-h{font-size:12.5px;font-weight:700;color:#0B4D57;margin:10px 0 2px}
-.thought{font-size:12.5px;color:#56636F;line-height:1.7;border-left:2px solid #D8DEE5;padding-left:10px}
-.stage{font-size:13.5px;font-weight:700;color:#0B4D57;border-bottom:1px solid #C3CCD6;padding-bottom:3px;margin:16px 0 2px}
-.stage-intro{font-size:13px;color:#56636F;margin:0 0 6px}
-.roles{font-size:13px;color:#56636F;line-height:1.7;margin:-4px 0 4px}
+.thought-h{font-size:12.5px;font-weight:700;color:#1F3A5F;margin:10px 0 2px}
+.thought{font-size:12.5px;color:#4B5563;line-height:1.7;border-left:2px solid #DCE0E5;padding-left:10px}
+.stage{font-size:13.5px;font-weight:700;color:#1F3A5F;border-bottom:1px solid #C3CCD6;padding-bottom:3px;margin:16px 0 2px}
+.stage-intro{font-size:13px;color:#4B5563;margin:0 0 6px}
+.roles{font-size:13px;color:#4B5563;line-height:1.7;margin:-4px 0 4px}
+h2,h3{color:#1F3A5F !important}
+.step-h{font-size:15px;font-weight:700;color:#1F3A5F;margin:0 0 2px}
+.step-h span{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:50%;background:#1E7F86;color:#fff;font-size:13px;margin-right:8px}
+.set-sum{font-size:13px;color:#4B5563;margin:-2px 0 6px}
 </style>""", unsafe_allow_html=True)
 
 
@@ -230,16 +234,33 @@ else:
     left, right = st.container(), None
 
 with left:
-    st.markdown("## 結構計算書審查")
-    st.caption("外審質疑 → 設計回覆 → 外審終審與解決方案 → 主任技師裁決；三個模型輪流擔任角色，最後綜合裁決")
+    st.markdown("## 審查這份設計")
+    st.caption("放入計算書與案件檔，找出設計疑點與需要修改的地方；審查過程由三個模型輪流擔任設計、外審與主任技師。")
+
+    with st.container(border=True, key="card_files"):
+        st.markdown('<div class="step-h"><span>1</span>放入計算書與案件檔</div>', unsafe_allow_html=True)
+        uploaded = st.file_uploader("結構計算書（PDF，或 Excel／CSV 摘要表）", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
+                                    key="calc_file")
+        case_up = st.file_uploader("RC 構件設計工具案件檔（.json，選填；與計算書同一組雜湊）", type=["json"], key="case_file",
+                                   help="在 RC 構件設計工具按「儲存案件」下載。提供後，解決方案會寫入調整後的案件檔，"
+                                        "可直接在工具中「開啟案件」重算；只有 PDF 時仍可審查，但無法產出可套用的案件修正。")
+        use_sample = st.checkbox("沒有檔案？先用示範計算書試（柱 C1，含兩項 NG）", value=uploaded is None, key="use_sample")
+        pair_box = st.container()
 
     has_key = any(secret_key(p) for p in KEY_ENV)
     slots: list[tuple[str, str]] = []  # 三個模型槽位 (provider, model)
     keys: dict[str, str] = {}
     with st.container(border=True, key="card_setup"):
+        st.markdown('<div class="step-h"><span>2</span>審查設定</div>', unsafe_allow_html=True)
+        set_sum = st.empty()
+        # 已確認的設定（部署端有 Key，或離線示範）收合；選了 AI 審查卻沒有 Key 時展開
+        need_key = st.session_state.get("mode", MODE_AI if has_key else MODE_DEMO) == MODE_AI and not has_key
+        set_box = st.expander("模型、輪數、API Key 與計費（已確認的設定可直接開始）", expanded=need_key)
+    with set_box:
         mode = st.radio("審查方式", [MODE_AI, MODE_DEMO], index=0 if has_key else 1, horizontal=True, key="mode")
         if mode == MODE_AI:
-            with st.expander("API Key", expanded=not has_key):
+            with st.container(border=True):
+                st.caption("API Key")
                 for prov in KEY_ENV:
                     # 部署端設定的 Key 只留在伺服器，不放進輸入框（否則會傳到使用者的瀏覽器）
                     preset = secret_key(prov)
@@ -301,10 +322,12 @@ with left:
                    f"共 {n_passes * 7 + 1} 次（含綜合裁決）；每次都附上計算書 PDF 原檔。")
 
         prices: dict[str, Price] = {}
-        with st.expander("計費單價與匯率（費用依實際 token 數計算）"):
-            fx = st.number_input("匯率（新台幣／美元）", value=USD_TWD, min_value=1.0, step=0.1, format="%.2f", key="fx")
-            for model in dict.fromkeys(m for _, m in slots):
-                base = default_price(model)
+        show_price = st.toggle("調整計費單價與匯率（費用依實際 token 數計算）", key="show_price")
+        fx = st.number_input("匯率（新台幣／美元）", value=USD_TWD, min_value=1.0, step=0.1, format="%.2f",
+                             key="fx") if show_price else st.session_state.get("fx", USD_TWD)
+        for model in dict.fromkeys(m for _, m in slots):
+            base = default_price(model)
+            if show_price:
                 st.markdown(f"**{model}**（美元／百萬 token）" + (f"　<small>{base.source}</small>" if base else ""),
                             unsafe_allow_html=True)
                 if base is None:
@@ -316,18 +339,17 @@ with left:
                                         format="%.3f", key=f"price_out_{model}")
                 p_cache = c3.number_input("快取讀取", value=base.cache_read if base else 0.0, min_value=0.0,
                                           step=0.01, format="%.3f", key=f"price_cache_{model}")
-                if base or p_in or p_out:
-                    write = p_in * 1.25 if model.startswith("claude") else 0.0  # Claude 快取寫入為輸入單價 1.25 倍
-                    prices[model] = Price(p_in, p_out, p_cache, write, "使用者設定" if base is None else base.source)
-            if not slots:
-                st.caption("離線示範不呼叫 API、不計費；token 數為依字數估算。")
+            else:
+                p_in, p_out, p_cache = (base.input, base.output, base.cache_read) if base else (0.0, 0.0, 0.0)
+            if base or p_in or p_out:
+                write = p_in * 1.25 if model.startswith("claude") else 0.0  # Claude 快取寫入為輸入單價 1.25 倍
+                prices[model] = Price(p_in, p_out, p_cache, write, "使用者設定" if base is None else base.source)
+        if not slots and show_price:
+            st.caption("離線示範不呼叫 API、不計費；token 數為依字數估算。")
 
-        uploaded = st.file_uploader("結構計算書（PDF，或 Excel／CSV 摘要表）", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
-                                    key="calc_file")
-        case_up = st.file_uploader("RC 構件設計工具案件檔（.json，選填）", type=["json"], key="case_file",
-                                   help="在 RC 構件設計工具按「儲存案件」下載。提供後，解決方案會寫入調整後的案件檔，"
-                                        "可直接在工具中「開啟案件」重算。")
-        use_sample = st.checkbox("使用示範計算書（柱 C1，含兩項 NG）", value=uploaded is None, key="use_sample")
+    set_sum.markdown(f'<div class="set-sum">{"離線示範（不呼叫 API、不計費）" if mode == MODE_DEMO else "AI 審查"}｜{n_passes} 輪、'
+                     f'{n_passes * 7 + 1} 次模型呼叫｜模型：{"、".join(dict.fromkeys(m for _, m in slots)) or "示範模型"}</div>',
+                     unsafe_allow_html=True)
 
     calc: CalcBook | None = None
     case, case_name = None, ""
@@ -356,15 +378,16 @@ with left:
             if case:
                 st.caption(f"案件檔：{case_name}（{rcmd.MODULE_LABEL[rcmd.case_module(case)]}模組）")
     if calc and case:   # 資料完整性：PDF 與案件檔是否同一版（不呼叫 AI）
-        pair = pairing.check(calc, case)
-        msg = f"**案件檔配對{pair.status}**：{pair.summary}"
-        (st.success if pair.status == pairing.MATCH else st.error if pair.status == pairing.MISMATCH else st.warning)(msg)
-        if pair.status == pairing.MISMATCH:
-            st.caption("不是同一版時，審查建議不會寫入調整後案件檔。請上傳與計算書同一版的案件檔（工具「儲存案件」）。")
-        src = rcmd.load_source_text(case)
-        if src:
-            with st.expander("內力來源（案件檔 loadsrc）"):
-                st.text(src)
+        with pair_box:
+            pair = pairing.check(calc, case)
+            msg = f"**案件檔配對{pair.status}**：{pair.summary}"
+            (st.success if pair.status == pairing.MATCH else st.error if pair.status == pairing.MISMATCH else st.warning)(msg)
+            if pair.status == pairing.MISMATCH:
+                st.caption("不是同一版時，審查建議不會寫入調整後案件檔。請上傳與計算書同一版的案件檔（工具「儲存案件」）。")
+            src = rcmd.load_source_text(case)
+            if src:
+                with st.expander("內力來源（案件檔 loadsrc）"):
+                    st.text(src)
 
     need_models = mode == MODE_AI and len(slots) < 3
     st.button("開始審查", type="primary", width="stretch", disabled=calc is None or need_models, key="run",

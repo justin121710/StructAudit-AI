@@ -1,12 +1,12 @@
-# 配色沿用 rc-member-designer（案 C「檢核導向」）：冷灰底＋白卡＋深青強調色；語意色 ok/warn/bad 與強調色分開
+# 配色依書稿（《Midas Civil 橋梁結構分析與設計實務》）：teal 1E7F86 為可操作元素、navy 1F3A5F 為標題；與 rc-member-designer、midas-curve-gen 一致
 [theme]
 base = "light"
-primaryColor = "#0F5F6B"
-backgroundColor = "#EBEEF2"
-secondaryBackgroundColor = "#F5F7F9"
+primaryColor = "#1E7F86"
+backgroundColor = "#F3F4F6"
+secondaryBackgroundColor = "#F7F8FA"
 textColor = "#151C24"
-borderColor = "#D8DEE5"
-linkColor = "#0F5F6B"
+borderColor = "#DCE0E5"
+linkColor = "#17666C"
 redColor = "#B03A2E"
 orangeColor = "#9A5E10"
 greenColor = "#1E7A44"
@@ -14,7 +14,7 @@ font = "Noto Sans TC:https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@
 baseFontSize = 14
 baseRadius = "6px"
 showWidgetBorder = true
-dataframeHeaderBackgroundColor = "#F5F7F9"
+dataframeHeaderBackgroundColor = "#E8EDF3"
 
 [client]
 toolbarMode = "minimal"

@@ -14,7 +14,8 @@ const TWEAKS = { nB: '3', nH: '3', tieSize: '#3' };
   const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
   await page.goto(URL);
   await page.waitForTimeout(2000);
-  await page.click('#setupSkip');
+  await page.evaluate(() => { const t = document.getElementById('taskSkip'); if (t && t.closest('.open')) t.click(); });   // 任務入口（2026-11）
+  await page.evaluate(() => { const b = document.getElementById('setupSkip'); if (b && b.closest('.open')) b.click(); });
   await page.evaluate(([tw]) => {
     const set = (id, v) => { const el = document.getElementById(id); el.value = v;
       el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };

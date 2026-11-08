@@ -15,8 +15,11 @@ def test_offline_review_flow_moves_output_to_the_right(monkeypatch):
     assert not at.exception
     assert not at.chat_message and not [c for c in at.columns if c.gap == "large"]  # 開始前只有置中的設定區
     assert {t.label for t in at.text_input} >= {"構件", "斷面", "設計依據"}  # 專案資料取自計算書
-    assert [x.key for x in at.number_input] == ["fx"]  # 沒有初篩門檻，只有計費匯率
-    assert not at.toggle  # 查閱規範固定執行，沒有開關
+    assert [x.key for x in at.number_input] == []  # 先交檔案：計費細節收在開關後（沒有初篩門檻）
+    assert [t.key for t in at.toggle] == ["show_price"]  # 唯一的開關是計費單價；查閱規範固定執行
+    assert any("審查設定" in x.value for x in at.markdown) and any("放入計算書與案件檔" in x.value for x in at.markdown)
+    at.toggle(key="show_price").set_value(True).run()
+    assert [x.key for x in at.number_input] == ["fx"]
     at.radio(key="passes").set_value(2).run()
     at.button(key="run").click().run()
     assert not at.exception
@@ -61,9 +64,10 @@ def test_pick_three_models_with_flagship_defaults(monkeypatch):
     picks = {s.key: s for s in at.selectbox if s.key and s.key.startswith("model_")}
     assert set(picks) == {"model_0_gemini", "model_1_gemini", "model_2_gemini"}
     assert all(p.value == "gemini-4-argon" for p in picks.values())  # 預設旗艦模型
+    at.toggle(key="show_price").set_value(True).run()  # 計費單價收在開關後
     prices = {x.key: x.value for x in at.number_input}
     assert prices["price_in_gemini-4-argon"] == 2.0 and prices["price_out_gemini-4-argon"] == 10.0
-    picks["model_1_gemini"].set_value("gemini-3-pro")
+    at.selectbox(key="model_1_gemini").set_value("gemini-3-pro")  # 開關重跑後重新取元素
     at.run()
     at.radio(key="passes").set_value(1).run()
     at.button(key="run").click().run()

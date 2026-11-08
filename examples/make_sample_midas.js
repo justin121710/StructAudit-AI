@@ -25,7 +25,7 @@ const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.
   const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
   await page.goto(`http://127.0.0.1:${srv.address().port}/index.html`);
   await page.waitForTimeout(2000);
-  await page.evaluate(() => { const b = document.getElementById('setupSkip'); if (b) b.click(); });
+  await page.evaluate(() => { for (const id of ['taskSkip', 'setupSkip']) { const b = document.getElementById(id); if (b && b.closest('.open')) b.click(); } });
   await page.evaluate(() => { const el = document.getElementById('codeBasis'); el.value = 'bridge'; el.dispatchEvent(new Event('change', { bubbles: true })); });
   await page.waitForTimeout(500);
   await page.evaluate(() => window.midasImport.open('pylon'));
