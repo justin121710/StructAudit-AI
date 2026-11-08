@@ -22,7 +22,7 @@ from utils import pairing
 from utils.calcbook import CalcBook, read_calcbook
 from utils.pdf_generator import generate_pdf
 from utils.pricing import USD_TWD, Price, default_price, summarize, twd
-from utils.report_model import build_model, report_number
+from utils.report_model import build_model, case_file_name, file_stem, report_number
 from utils.xlsx_report import generate_xlsx
 
 EXAMPLES = Path(__file__).parent / "examples"
@@ -453,16 +453,16 @@ with right:
                 sol = f"　建議：{it.solution.label}" if it.solution else ""
                 st.markdown(f'<div class="alert a-{lv}"><b>{it.risk}</b>｜{it.title}{sol}</div>', unsafe_allow_html=True)
             d1, d2, d3 = st.columns(3)
-            d1.download_button("下載 PDF 報告", pdf_bytes, f"{no}.pdf", "application/pdf", type="primary",
+            stem = file_stem(session)  # {構件}_審查報告_{輸入雜湊前 8 碼}_{報告編號}，與案件檔、計算書排在一起
+            d1.download_button("下載 PDF 報告", pdf_bytes, f"{stem}.pdf", "application/pdf", type="primary",
                                width="stretch")
-            d2.download_button("下載 Excel", xlsx_bytes, f"{no}.xlsx",
+            d2.download_button("下載 Excel", xlsx_bytes, f"{stem}.xlsx",
                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", width="stretch")
             d3.download_button("下載 JSON", json.dumps(session.to_dict(), ensure_ascii=False, indent=2),
-                               f"{no}.json", "application/json", width="stretch")
+                               f"{stem}.json", "application/json", width="stretch")
             e1, e2 = st.columns(2)
             if session.adjusted_case:
-                stem = Path(session.case_name).stem or "case"
-                e1.download_button("下載調整後案件檔", rcmd.case_bytes(session.adjusted_case), f"{stem}_審查調整.json",
+                e1.download_button("下載調整後案件檔", rcmd.case_bytes(session.adjusted_case), case_file_name(session),
                                    "application/json", width="stretch",
                                    help="於 RC 構件設計工具按「開啟案件」載入，重算確認各檢核項目轉為 OK。")
             e2.link_button("開啟 RC 構件設計工具", rcmd.TOOL_URL, width="stretch")

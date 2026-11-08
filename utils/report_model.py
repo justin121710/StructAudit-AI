@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -105,6 +106,36 @@ class ReportModel:
 def report_number(session: ReviewSession) -> str:
     stamp = datetime.strptime(session.started_at, "%Y-%m-%d %H:%M").strftime("%Y%m%d-%H%M")
     return f"SR-{stamp}"
+
+
+def _file_safe(text: str) -> str:
+    return re.sub(r'[\\/:*?"<>|\s]+', "", str(text or ""))
+
+
+def input_hash8(session: ReviewSession) -> str:
+    """計算書表頭「輸入 SHA-256」前 8 碼（rc-member-designer 計算書才有；沒有時回傳空字串）。"""
+    m = re.search(r"輸入\s*SHA-256\s*([0-9a-f]{8})", str((session.project_info or {}).get("程式版本／雜湊", "")))
+    return m.group(1) if m else ""
+
+
+def file_stem(session: ReviewSession, doc: str = "審查報告") -> str:
+    """下載檔名（團隊共用資料夾命名，rc-member-designer docs/TEAM_FOLDER.md）：
+    {構件}_{文件}_{輸入雜湊前 8 碼}_{報告編號}。與案件檔 {構件}_案件_{雜湊}.json、計算書 PDF 同一組雜湊，
+    放進同一資料夾時排在一起；計算書沒有構件名稱與雜湊時退回報告編號。"""
+    no = report_number(session)
+    mem, h = _file_safe((session.project_info or {}).get("構件", "")), input_hash8(session)
+    if not (mem or h):
+        return no
+    return "_".join(x for x in (mem, doc, h, no) if x)
+
+
+def case_file_name(session: ReviewSession) -> str:
+    """調整後案件檔名：{構件}_案件_{原輸入雜湊前 8 碼}_審查調整.json（原案件檔名無法辨識時沿用其檔名）。"""
+    mem, h = _file_safe((session.project_info or {}).get("構件", "")), input_hash8(session)
+    if mem and h:
+        return f"{mem}_案件_{h}_審查調整.json"
+    stem = _file_safe(re.sub(r"\.json$", "", session.case_name or "", flags=re.I)) or "case"
+    return f"{stem}_審查調整.json"
 
 
 def trace_text(session: ReviewSession) -> str:

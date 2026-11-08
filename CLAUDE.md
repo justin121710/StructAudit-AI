@@ -16,6 +16,9 @@
 - 配對核對（`utils/pairing.py`）：`case_input_hash` 必須與 rc-member-designer `inputHash` 相同（去掉 saved、members、conf、review 後的 JSON 雜湊）；
   不符時 `orchestrator._apply_case` 不寫出調整後案件檔。寫回只改 `values`，並附 `review` 區塊（契約見 rc-member-designer `docs/INTEGRATION.md` §3.3～3.5）。
   rc-member-designer 改了該段文字或 `loadsrc` 欄位時，同步修改這裡並以 `examples/make_sample_midas.js` 重產示範檔。
+- 下載檔名（多人共用，rc-member-designer `docs/TEAM_FOLDER.md`、INTEGRATION §3.6）：`utils/report_model.py` 的 `file_stem`
+  （`{構件}_審查報告_{雜湊8}_{報告編號}`）與 `case_file_name`（`{構件}_案件_{雜湊8}_審查調整.json`）必須與 rc-member-designer `fileStem`
+  （`{構件}_案件_{雜湊8}.json`）同一規則；雜湊8＝計算書表頭「輸入 SHA-256」前 8 碼。
 - 四個工具的串接規格見 rc-member-designer `docs/INTEGRATION.md`。
 
 ## 示範檔

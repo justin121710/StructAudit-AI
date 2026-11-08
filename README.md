@@ -143,6 +143,7 @@ Claude 的 Opus 5.5、Opus 5、Sonnet 5.5、Fable 5.1 會開啟伺服器端拒�
 | Excel | 「檢核表」＋「審查報告(A4)」，色碼與 rc-member-designer 一致；算式轉為可讀文字 |
 | JSON | 各輪完整輸出、查閱的條文、對話紀錄、系統紀錄 |
 | 調整後案件檔 | 可直接在 rc-member-designer「開啟案件」 |
+| 檔名 | 報告 `{構件}_審查報告_{雜湊8}_{報告編號}`、調整後案件檔 `{構件}_案件_{雜湊8}_審查調整.json`；雜湊8＝計算書表頭「輸入 SHA-256」前 8 碼，與 rc-member-designer 的案件檔、計算書檔名相同，放進團隊資料夾時排在一起（多人共用規則見 rc-member-designer `docs/TEAM_FOLDER.md`）。計算書沒有構件名稱與雜湊時用報告編號 |
 | 用量與費用 | 介面即時顯示、報告 2.1 節與 JSON `usage`／`cost`：各模型呼叫次數、輸入／快取／輸出 token 與新台幣費用 |
 
 - **LaTeX 算式**：所有算式欄位都是 LaTeX（KaTeX 語法，與 rc-member-designer 計算書相同寫法）。

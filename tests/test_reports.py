@@ -8,7 +8,8 @@ from agents.llm_client import MockClient
 from orchestrator import ReviewOrchestrator
 from utils.calcbook import read_calcbook
 from utils.rcmd import load_case
-from utils.report_model import build_model, meta_rows
+from utils.pairing import case_input_hash
+from utils.report_model import build_model, case_file_name, file_stem, meta_rows, report_number
 from utils.xlsx_report import generate_xlsx
 
 
@@ -61,3 +62,20 @@ def test_xlsx_layout_and_formula_guard(session):
     assert "2.1 審查用量與費用" in texts
     assert "四、解決方案（改動最小且符合規範）" in texts and "六、檢核彙總" in texts and "設計" in texts
     assert any("≥" in t or "≤" in t for t in texts)  # LaTeX 轉為可讀文字
+
+
+def test_download_names_follow_team_folder_rule(session):
+    """團隊共用資料夾命名：{構件}_{文件}_{輸入雜湊前 8 碼}，與 rc-member-designer 案件檔名同一組雜湊。"""
+    case = load_case(open("examples/sample_C1_case.json", "rb").read())
+    h = case_input_hash(case)[:8]
+    assert file_stem(session) == f"C1_審查報告_{h}_{report_number(session)}"
+    assert case_file_name(session) == f"C1_案件_{h}_審查調整.json"
+
+
+def test_download_names_fallback_without_header():
+    calc = read_calcbook("examples/sample_C1_calc.pdf")
+    s = ReviewOrchestrator(MockClient, passes=1).run(calc, None, "my case.json", {})
+    s.project_info.pop("構件", None)
+    s.project_info.pop("程式版本／雜湊", None)
+    assert file_stem(s) == report_number(s)
+    assert case_file_name(s) == "mycase_審查調整.json"
