@@ -19,6 +19,8 @@
 - 下載檔名（多人共用，rc-member-designer `docs/TEAM_FOLDER.md`、INTEGRATION §3.6）：`utils/report_model.py` 的 `file_stem`
   （`{構件}_審查報告_{雜湊8}_{報告編號}`）與 `case_file_name`（`{構件}_案件_{雜湊8}_審查調整.json`）必須與 rc-member-designer `fileStem`
   （`{構件}_案件_{雜湊8}.json`）同一規則；雜湊8＝計算書表頭「輸入 SHA-256」前 8 碼。
+- 介面配色依書稿（`.streamlit/config.toml` 與 `app.py` 的 CSS：teal `#1E7F86`、navy `#1F3A5F`），與 rc-member-designer、midas-curve-gen 一致。
+- 示範檔腳本開啟 rc-member-designer 時要先關任務入口（`#taskSkip`）。
 - 四個工具的串接規格見 rc-member-designer `docs/INTEGRATION.md`。
 
 ## 示範檔
