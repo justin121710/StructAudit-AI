@@ -34,7 +34,7 @@ KEY_ALIASES = {
     "openai": {"OPENAIAPIKEY", "OPENAIKEY"},
     "claude": {"ANTHROPICAPIKEY", "ANTHROPICKEY", "CLAUDEAPIKEY", "CLAUDEKEY"},
 }
-MODE_AI, MODE_DEMO = "使用 AI 模型", "離線示範（不呼叫 API）"
+MODE_AI, MODE_DEMO = "AI 模型", "離線示範"
 SLOT_PROVIDER = ["gemini", "claude", "openai"]  # 三個模型槽位的預設服務商（第 1 輪依序擔任 A／B／C）
 ROLE_SHORT = {"A": "設計", "B": "外審", "C": "主任技師"}
 # 頭像用 Material 線條圖示（不用 emoji），與 rc-member-designer 的線條圖示風格一致
@@ -235,16 +235,13 @@ else:
 
 with left:
     st.markdown("## 審查這份設計")
-    st.caption("放入計算書與案件檔，找出設計疑點與需要修改的地方；審查過程由三個模型輪流擔任設計、外審與主任技師。")
 
     with st.container(border=True, key="card_files"):
         st.markdown('<div class="step-h"><span>1</span>放入計算書與案件檔</div>', unsafe_allow_html=True)
-        uploaded = st.file_uploader("結構計算書（PDF，或 Excel／CSV 摘要表）", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
+        uploaded = st.file_uploader("計算書", type=["pdf", "xlsx", "xls", "xlsm", "csv"],
                                     key="calc_file")
-        case_up = st.file_uploader("RC 構件設計工具案件檔（.json，選填；與計算書同一組雜湊）", type=["json"], key="case_file",
-                                   help="在 RC 構件設計工具按「儲存案件」下載。提供後，解決方案會寫入調整後的案件檔，"
-                                        "可直接在工具中「開啟案件」重算；只有 PDF 時仍可審查，但無法產出可套用的案件修正。")
-        use_sample = st.checkbox("沒有檔案？先用示範計算書試（柱 C1，含兩項 NG）", value=uploaded is None, key="use_sample")
+        case_up = st.file_uploader("案件檔（選填）", type=["json"], key="case_file")
+        use_sample = st.checkbox("示範計算書（柱 C1）", value=uploaded is None, key="use_sample")
         pair_box = st.container()
 
     has_key = any(secret_key(p) for p in KEY_ENV)
@@ -255,12 +252,11 @@ with left:
         set_sum = st.empty()
         # 已確認的設定（部署端有 Key，或離線示範）收合；選了 AI 審查卻沒有 Key 時展開
         need_key = st.session_state.get("mode", MODE_AI if has_key else MODE_DEMO) == MODE_AI and not has_key
-        set_box = st.expander("模型、輪數、API Key 與計費（已確認的設定可直接開始）", expanded=need_key)
+        set_box = st.expander("模型與計費", expanded=need_key)
     with set_box:
         mode = st.radio("審查方式", [MODE_AI, MODE_DEMO], index=0 if has_key else 1, horizontal=True, key="mode")
         if mode == MODE_AI:
             with st.container(border=True):
-                st.caption("API Key")
                 for prov in KEY_ENV:
                     # 部署端設定的 Key 只留在伺服器，不放進輸入框（否則會傳到使用者的瀏覽器）
                     preset = secret_key(prov)
@@ -268,8 +264,6 @@ with left:
                                           placeholder="已使用部署設定的 Key，輸入可改用自己的" if preset else "")
                     if typed.strip() or preset:
                         keys[prov] = typed.strip() or preset
-                st.caption("至少填一家；有多家的 Key 時，三個模型可以來自不同服務商。"
-                           f"部署時請在 Secrets 設定 {'／'.join(KEY_ENV.values())}。")
 
             models_by_prov: dict[str, list[str]] = {}
             failed = False
@@ -283,11 +277,10 @@ with left:
                 if names:
                     models_by_prov[prov] = names
             if models_by_prov:
-                st.markdown("**三個模型**（每一輪輪流擔任設計、外審、主任技師）")
+                st.markdown("**模型**")
                 provs = list(models_by_prov)
                 for n in range(3):
-                    role = ROLES[n]
-                    label = f"模型 {n + 1}（第 1 輪擔任{ROLE_SHORT[role]}）"
+                    label = f"模型 {n + 1}"
                     want = SLOT_PROVIDER[n]
                     if len(provs) == 1:  # 只有一家：直接選模型
                         prov = provs[0]
@@ -307,22 +300,19 @@ with left:
                     fetch_models.clear()
                     st.rerun()
             elif keys and not failed:
-                st.caption("此 API Key 查不到可用的文字模型。")
+                st.caption("查無可用模型")
 
         n_passes = st.radio("審查輪數", [1, 2, 3], index=2, horizontal=True, key="passes",
-                            format_func=lambda n: f"{n} 輪",
-                            help="每一輪由三個模型輪流擔任設計、外審、主任技師，各輪為全新對話、互不共用記憶。")
+                            format_func=lambda n: f"{n} 輪")
         names_for = [m for _, m in slots] if slots else ["示範模型"] * 3
         rows = ["| 輪次 | A 設計 | B 外審 | C 主任技師 |", "|---|---|---|---|"]
         for p in range(1, n_passes + 1):
             idx = ReviewOrchestrator.roles_for(p)
             rows.append(f"| 第 {p} 輪 | " + " | ".join(names_for[idx[r]] for r in ROLES) + " |")
         st.markdown("\n".join(rows))
-        st.caption(f"每輪 7 次模型呼叫（Round 1～3 前各查閱一次規範原文＋Round 1～3＋主任技師；查閱規範固定執行），"
-                   f"共 {n_passes * 7 + 1} 次（含綜合裁決）；每次都附上計算書 PDF 原檔。")
 
         prices: dict[str, Price] = {}
-        show_price = st.toggle("調整計費單價與匯率（費用依實際 token 數計算）", key="show_price")
+        show_price = st.toggle("單價與匯率", key="show_price")
         fx = st.number_input("匯率（新台幣／美元）", value=USD_TWD, min_value=1.0, step=0.1, format="%.2f",
                              key="fx") if show_price else st.session_state.get("fx", USD_TWD)
         for model in dict.fromkeys(m for _, m in slots):
@@ -331,7 +321,7 @@ with left:
                 st.markdown(f"**{model}**（美元／百萬 token）" + (f"　<small>{base.source}</small>" if base else ""),
                             unsafe_allow_html=True)
                 if base is None:
-                    st.caption("未收錄此模型的單價，請依服務商價目表填寫；未填寫時只顯示 token 數。")
+                    st.caption("未收錄單價")
                 c1, c2, c3 = st.columns(3)
                 p_in = c1.number_input("輸入", value=base.input if base else 0.0, min_value=0.0, step=0.1,
                                        format="%.3f", key=f"price_in_{model}")
@@ -344,11 +334,8 @@ with left:
             if base or p_in or p_out:
                 write = p_in * 1.25 if model.startswith("claude") else 0.0  # Claude 快取寫入為輸入單價 1.25 倍
                 prices[model] = Price(p_in, p_out, p_cache, write, "使用者設定" if base is None else base.source)
-        if not slots and show_price:
-            st.caption("離線示範不呼叫 API、不計費；token 數為依字數估算。")
 
-    set_sum.markdown(f'<div class="set-sum">{"離線示範（不呼叫 API、不計費）" if mode == MODE_DEMO else "AI 審查"}｜{n_passes} 輪、'
-                     f'{n_passes * 7 + 1} 次模型呼叫｜模型：{"、".join(dict.fromkeys(m for _, m in slots)) or "示範模型"}</div>',
+    set_sum.markdown(f'<div class="set-sum">{"離線示範" if mode == MODE_DEMO else "AI 審查"}｜{n_passes} 輪｜模型：{"、".join(dict.fromkeys(m for _, m in slots)) or "示範模型"}</div>',
                      unsafe_allow_html=True)
 
     calc: CalcBook | None = None
@@ -370,9 +357,9 @@ with left:
 
     project_info: dict[str, str] = {}
     if calc:
-        with st.expander(f"專案資料（取自計算書：{calc.filename}，{calc.n_pages or '—'} 頁）"):
+        with st.expander(f"專案資料｜{calc.filename}"):
             if not calc.facts:
-                st.caption("計算書表頭未辨識到專案資料；審查時由 Agent 從計算書內容補充。")
+                st.caption("表頭未辨識")
             for k, v in calc.facts.items():
                 project_info[k] = st.text_input(k, v, key=f"fact_{calc.sha256[:10]}_{k}")
             if case:
@@ -383,7 +370,7 @@ with left:
             msg = f"**案件檔配對{pair.status}**：{pair.summary}"
             (st.success if pair.status == pairing.MATCH else st.error if pair.status == pairing.MISMATCH else st.warning)(msg)
             if pair.status == pairing.MISMATCH:
-                st.caption("不是同一版時，審查建議不會寫入調整後案件檔。請上傳與計算書同一版的案件檔（工具「儲存案件」）。")
+                st.caption("不同版：建議不寫入案件檔")
             src = rcmd.load_source_text(case)
             if src:
                 with st.expander("內力來源（案件檔 loadsrc）"):
@@ -393,7 +380,7 @@ with left:
     st.button("開始審查", type="primary", width="stretch", disabled=calc is None or need_models, key="run",
               on_click=_start)
     if need_models:
-        st.caption("請輸入 API Key 並選好三個模型，或改用離線示範。")
+        st.caption("需要 API Key 與三個模型")
 
 # ================================================================ 右側：審查輸出
 session: ReviewSession | None = st.session_state.get("review")
@@ -454,7 +441,7 @@ with right:
     elif session:
         with thinking_slot.expander(f"審查完成｜AI 思考過程（{len(session.thoughts)} 段）"):
             if not session.thoughts:
-                st.caption("所選模型沒有回傳思考摘要。")
+                st.caption("無思考摘要")
             for entry in session.thoughts:
                 ThinkingView.render(entry)
         for msg in session.transcript:

@@ -27,3 +27,6 @@
 
 - `examples/sample_C1_*`：建築柱 C1（`make_sample_pdf.js`）。
 - `examples/sample_P1_midas_*`：從 Midas 匯入的橋墩 P1（`make_sample_midas.js`，需 rc-member-designer 與 Playwright）。
+
+## UI／UX 原則（四個專案共用）
+避免不必要的次要標籤與文字說明，讓版面自己說話：移除多餘小字、輔助標籤與冗長說明（`st.caption`、`help=`）；以排版、留白、圖示與視覺層級傳達功能；極簡、不擁擠。
