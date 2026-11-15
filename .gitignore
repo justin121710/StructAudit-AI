@@ -6,3 +6,4 @@ __pycache__/
 .streamlit/secrets.toml
 *.pdf
 !examples/sample_C1_calc.pdf
+!examples/sample_P1_midas_calc.pdf
