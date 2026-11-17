@@ -144,7 +144,7 @@ def load_source_text(pages: list[str]) -> str:
     """擷取 rc-member-designer 計算書的「內力來源」段落（自 Midas Civil 匯入載重時才有），最多 4000 字。"""
     lines = "\n".join(pages).splitlines()
     for i, x in enumerate(lines):
-        if x.strip() == "內力來源" and any("Midas" in y for y in lines[i + 1:i + 3]):
+        if x.strip() == "內力來源" and any("Midas" in y or "SAP2000" in y for y in lines[i + 1:i + 3]):
             out = []
             for y in lines[i + 1:]:
                 if _SECTION_END.match(y):
@@ -159,14 +159,15 @@ def load_source_summary(text: str) -> str:
     if not text:
         return ""
     flat = re.sub(r"\s*\n\s*", "", text)
-    parts = ["Midas Civil 結果表格匯入" + ("（版內力，Wood-Armer）" if "Wood-Armer" in flat else "")]
+    prog = "SAP2000" if "SAP2000" in flat[:200] else "Midas Civil"
+    parts = [f"{prog} 結果表格匯入" + ("（版內力，Wood-Armer）" if "Wood-Armer" in flat else "")]
     m = re.search(r"結構群組\s*([^\s、，,。]+)", flat)
     if m:
         parts.append(f"結構群組 {m.group(1)}")
     m = re.search(r"元素\s*([0-9][0-9to by]*)", flat)
     if m:
         parts.append(f"元素 {m.group(1).strip()}")
-    m = re.search(r"模型\s*(\S+?\.mct)", flat)
+    m = re.search(r"模型\s*(\S+?\.(?:mct|s2k|\$2k))", flat)
     if m:
         parts.append(f"模型 {m.group(1)}")
     if "已修改" in flat:

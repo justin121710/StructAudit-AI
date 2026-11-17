@@ -367,6 +367,10 @@ class ReviewOrchestrator:
             if self._pair.status != pairing.MATCH:
                 session.notes.append(f"案件檔配對{self._pair.status}：{self._pair.summary}")
         self._module = (rcmd.case_module(case) if case else None) or calc.module or "pylon"
+        # 一般計算書模式：沒有案件檔、也不是 rc-member-designer 的計算書（手算＋Midas／SAP2000 等）
+        self._general = not case and not calc.from_rcmd
+        session.calc["mode"] = "general" if self._general else "rcmd"
+        session.project_info.setdefault("審查模式", "一般計算書" if self._general else "rc-member-designer 計算書")
         self._scope = scope_of(calc.basis)
         self._att = [Attachment(calc.filename, calc.pdf)] if calc.pdf else []
         for p in range(1, self.passes + 1):
@@ -399,6 +403,15 @@ class ReviewOrchestrator:
         return client.generate(system, user, schema, temperature=TEMPERATURE[agent], task=task, payload=payload,
                                attachments=self._att)
 
+    def _sys(self, agent: str) -> str:
+        return P.system_prompt(agent, getattr(self, "_general", False))
+
+    def _params(self) -> str:
+        return P.PARAMS_GENERAL if getattr(self, "_general", False) else rcmd.catalog_text(self._module, self._case)
+
+    def _tool_url(self) -> str:
+        return "—（一般計算書）" if getattr(self, "_general", False) else rcmd.TOOL_URL
+
     def _common(self) -> dict:
         return {"facts": self._calc.facts_text() or "（計算書表頭未辨識）", "calc": self._calc.prompt_text()}
 
@@ -407,8 +420,7 @@ class ReviewOrchestrator:
         user = P.LOOKUP_USER.format(stage=stage, catalog=self.lib.catalog(self._scope), toc=self.lib.toc(self._scope),
                                     have=lib.listing(), extra=extra, schema=schema_text(S.LookupRequest),
                                     **self._common())
-        req: S.LookupRequest = self._call(client, agent, {"A": P.AGENT_A_SYSTEM, "B": P.AGENT_B_SYSTEM,
-                                                           "C": P.AGENT_C_SYSTEM}[agent], user, S.LookupRequest,
+        req: S.LookupRequest = self._call(client, agent, self._sys(agent), user, S.LookupRequest,
                                           "lookup", {"stage": stage_key})
         added, missing = [], []
         for r in req.clauses[:20]:
@@ -447,7 +459,7 @@ class ReviewOrchestrator:
         self._lookup(s, ps, client, "B", lib, "round1", "Round 1 初審質疑")
         self.on_progress("round1", f"第 {ps.no} 輪｜Round 1｜{AGENT_NAMES['B']} 初審質疑中…")
         user = P.ROUND1_USER.format(clauses=lib.text(), schema=schema_text(S.Round1Output), **self._common())
-        out: S.Round1Output = self._call(client, "B", P.AGENT_B_SYSTEM, user, S.Round1Output, "round1",
+        out: S.Round1Output = self._call(client, "B", self._sys("B"), user, S.Round1Output, "round1",
                                          {"calc_text": self._calc.text(), "facts": self._calc.facts})
         for n, issue in enumerate(out.issues, 1):  # 統一編號，避免模型自行編號重複或跳號
             issue.issue_id = f"Q{n}"
@@ -474,10 +486,10 @@ class ReviewOrchestrator:
         user = P.ROUND2_USER.format(clauses=lib.text(), issues=issues_json, schema=schema_text(S.Round2Output),
                                     **self._common())
         payload = {"issues": [i.model_dump(mode="json") for i in ps.round1.issues]}
-        out: S.Round2Output = self._call(client, "A", P.AGENT_A_SYSTEM, user, S.Round2Output, "round2", payload)
+        out: S.Round2Output = self._call(client, "A", self._sys("A"), user, S.Round2Output, "round2", payload)
         missing = self._missing(ps.issue_ids, [r.issue_id for r in out.responses])
         if missing:
-            retry = self._call(client, "A", P.AGENT_A_SYSTEM,
+            retry = self._call(client, "A", self._sys("A"),
                                user + f"\n\n# 注意\n上次輸出遺漏 {', '.join(missing)}，請補齊全部疑義的回覆。",
                                S.Round2Output, "round2", payload)
             out = self._merge(out, retry, "responses")
@@ -504,13 +516,13 @@ class ReviewOrchestrator:
         debate = format_debate(ps, include_verdicts=False)
         self._lookup(s, ps, client, "B", lib, "round3", "Round 3 覆核終審", f"\n## 辯論紀錄\n{debate}\n")
         self.on_progress("round3", f"第 {ps.no} 輪｜Round 3｜{AGENT_NAMES['B']} 覆核終審與研擬方案中…")
-        user = P.ROUND3_USER.format(clauses=lib.text(), debate=debate, tool_url=rcmd.TOOL_URL,
-                                    params=rcmd.catalog_text(self._module, self._case),
+        user = P.ROUND3_USER.format(clauses=lib.text(), debate=debate, tool_url=self._tool_url(),
+                                    params=self._params(),
                                     schema=schema_text(S.Round3Output), **self._common())
         payload = {"issues": [i.model_dump(mode="json") for i in ps.round1.issues],
                    "responses": [r.model_dump(mode="json") for r in ps.round2.responses],
                    "case_values": (self._case or {}).get("values"), "module": self._module}
-        out: S.Round3Output = self._call(client, "B", P.AGENT_B_SYSTEM, user, S.Round3Output, "round3", payload)
+        out: S.Round3Output = self._call(client, "B", self._sys("B"), user, S.Round3Output, "round3", payload)
 
         missing = self._missing(ps.issue_ids, [v.issue_id for v in out.verdicts])
         no_fix = [v.issue_id for v in out.verdicts if v.risk_level != S.RiskLevel.LOW and not v.solutions]
@@ -520,7 +532,7 @@ class ReviewOrchestrator:
                 ask.append(f"上次輸出遺漏 {', '.join(missing)}，請補齊全部疑義的判定。")
             if no_fix:
                 ask.append(f"{', '.join(no_fix)} 為中風險或高風險，必須提出具體解決方案（solutions）。")
-            retry = self._call(client, "B", P.AGENT_B_SYSTEM, user + "\n\n# 注意\n" + "\n".join(ask),
+            retry = self._call(client, "B", self._sys("B"), user + "\n\n# 注意\n" + "\n".join(ask),
                                S.Round3Output, "round3", payload)
             got = {v.issue_id: v for v in retry.verdicts}
             out.verdicts = [got[v.issue_id] if v.issue_id in no_fix and got.get(v.issue_id, v).solutions else v
@@ -542,6 +554,9 @@ class ReviewOrchestrator:
                 v.recommended_solution = 1
             for n, sol in enumerate(v.solutions, 1):
                 for c in sol.changes:
+                    if self._general:
+                        c.param_id = ""                         # 一般計算書沒有工具欄位
+                        continue
                     why = c.param_id and rcmd.validate_change(self._module, c.param_id, c.proposed, self._case)
                     if why:
                         s.notes.append(f"第 {ps.no} 輪 {v.issue_id} 方案 {n}：{why}（建議值「{c.proposed}」無法直接套用）。")
@@ -566,11 +581,11 @@ class ReviewOrchestrator:
     def chief(self, s: ReviewSession, ps: PassResult, client: LLMClient, lib: _PassLibrary) -> None:
         self.on_progress("chief", f"第 {ps.no} 輪｜彙整｜{AGENT_NAMES['C']} 裁決與複核方案中…")
         user = P.CHIEF_USER.format(issue_ids="、".join(ps.issue_ids), clauses=lib.text(), debate=format_debate(ps),
-                                   params=rcmd.catalog_text(self._module, self._case),
+                                   params=self._params(),
                                    schema=schema_text(S.ChiefReport), **self._common())
         payload = {"issues": [i.model_dump(mode="json") for i in ps.round1.issues],
                    "verdicts": [v.model_dump(mode="json") for v in ps.round3.verdicts]}
-        report: S.ChiefReport = self._call(client, "C", P.AGENT_C_SYSTEM, user, S.ChiefReport, "chief", payload)
+        report: S.ChiefReport = self._call(client, "C", self._sys("C"), user, S.ChiefReport, "chief", payload)
         ps.chief = self._normalize_report(report, s, ps)
         c = ps.chief
         lines = [f"**本輪結論**：{c.overall_conclusion.value}", c.executive_summary]
@@ -615,10 +630,10 @@ class ReviewOrchestrator:
         roles = "\n".join(f"- 第 {ps.no} 輪：" + "；".join(f"{AGENT_NAMES[r]}＝{m}" for r, m in ps.roles.items())
                           for ps in s.passes)
         user = P.FINAL_USER.format(n_passes=len(s.passes), roles=roles, facts=self._calc.facts_text(),
-                                   tool_url=rcmd.TOOL_URL, params=rcmd.catalog_text(self._module, self._case),
+                                   tool_url=self._tool_url(), params=self._params(),
                                    clauses=lib.text(), passes="\n\n".join(blocks),
                                    schema=schema_text(S.ConsolidatedReport))
-        out: S.ConsolidatedReport = client.generate(P.FINAL_SYSTEM, user, S.ConsolidatedReport,
+        out: S.ConsolidatedReport = client.generate(self._sys("F"), user, S.ConsolidatedReport,
                                                     temperature=TEMPERATURE["F"], task="final",
                                                     payload={"passes": payload}, attachments=self._att)
         s.final = self._normalize_final(out, s)
@@ -635,7 +650,7 @@ class ReviewOrchestrator:
                 body += f"\n\n**為何改動最小**：{it.why_minimal}"
             lines.append(body)
         if f.tool_summary:
-            lines.append(f"**rc-member-designer 調整總結**：{f.tool_summary}")
+            lines.append(f"**{'修正項目總結' if self._general else 'rc-member-designer 調整總結'}**：{f.tool_summary}")
         if s.adjusted_applied:
             lines.append("**已寫入調整後案件檔**：\n" + "\n".join(f"- {x}" for x in s.adjusted_applied))
         self._say(s, "F", "final", "綜合裁決", "\n\n".join(lines), 0, client.model)

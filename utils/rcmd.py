@@ -130,8 +130,10 @@ def load_source_text(case: dict | None, module: str | None = None) -> str:
         return ""
     loads = case.get("bloads" if mod == "beam" else "loads") or []
     edited = loads_edited(loads, src.get("key", ""))
-    kind = "版內力（Plate Force），" + f"{src.get('dir', 'x')} 向 Wood-Armer" if src.get("kind") == "plate" else "Beam Force"
-    lines = [f"載重來源（案件檔 loadsrc）：Midas Civil {kind}；內力表 {src.get('table') or '貼上'}（單位 {src.get('units', '')}）"
+    sap = src.get("from") == "sap"
+    kind = ("版內力（Plate Force），" + f"{src.get('dir', 'x')} 向 Wood-Armer" if src.get("kind") == "plate"
+            else "Element Forces - Frames（P_u = −P、M_ux = M3、M_uy = M2）" if sap else "Beam Force")
+    lines = [f"載重來源（案件檔 loadsrc）：{'SAP2000' if sap else 'Midas Civil'} {kind}；內力表 {src.get('table') or '貼上'}（單位 {src.get('units', '')}）"
              + (f"；模型 {src['mct']}" if src.get("mct") else "")
              + (f"；結構群組 {src['group']}" if src.get("group") else "") + f"；元素 {src.get('elems', '')}"
              + (f"；{src['tb']}" if src.get("tb") else "")

@@ -127,7 +127,7 @@ def _check_sheet(ws, m: ReportModel):
     if not m.items:
         item(["無疑義項目", "—", "OK", "低風險", "", "", ""])
 
-    section("二、rc-member-designer 調整參數（" + m.tool_url + "）")
+    section("二、修改項目" if m.general else "二、rc-member-designer 調整參數（" + m.tool_url + "）")
     item(["參數", "欄位 id", "", "", "目前值 → 建議值", "所屬項目／方案", "單位"], head=True)
     for it in m.items:
         for ch in (it.solution.changes if it.solution else []):
@@ -352,7 +352,7 @@ def _a4_sheet(ws, m: ReportModel):
         if sol:
             a.para("建議方案", f"{sol.label}\n做法：{sol.approach}\n改動幅度：{sol.change_extent}")
             if sol.changes:
-                a.table(["rc-member-designer 欄位", "參數", "目前值", "建議值", "單位"],
+                a.table([m.field_head, "參數", "目前值", "建議值", "單位"],
                         [[c.param_id or "—", c.label, c.current, c.proposed, c.unit] for c in sol.changes])
             a.para("修正後驗算", "\n".join(tex_text(sol.verification)))
             if sol.tool_steps:
@@ -363,8 +363,8 @@ def _a4_sheet(ws, m: ReportModel):
             a.para("改動最小", it.why_minimal)
         if it.required_action:
             a.para("應辦事項", it.required_action)
-    a.sub("rc-member-designer 調整總結")
-    a.para("", f"工具：{m.tool_url}" + (f"\n{m.tool_summary}" if m.tool_summary else ""))
+    a.sub(m.fix_title)
+    a.para("", (f"工具：{m.tool_url}\n" if m.tool_url else "") + (m.tool_summary or ("—" if not m.tool_url else "")))
     if m.adjusted_applied:
         a.para("案件檔", "已寫入調整後案件檔：\n" + "\n".join(m.adjusted_applied))
 
@@ -394,7 +394,7 @@ def _a4_sheet(ws, m: ReportModel):
     a.chap("七、附註")
     a.para("7.1", "本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。")
     a.para("7.2", "Agent 引用之條文已逐條比對規範原文索引；條文要點與數值仍應由審查技師對照原文確認。")
-    a.para("7.3", "建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。")
+    a.para("7.3", m.recheck_note)
     a.para("7.4", "本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。")
     for k, note in enumerate(m.notes, 5):
         a.para(f"7.{k}", f"系統紀錄：{note}")

@@ -7,3 +7,4 @@ __pycache__/
 *.pdf
 !examples/sample_C1_calc.pdf
 !examples/sample_P1_midas_calc.pdf
+bench/results/

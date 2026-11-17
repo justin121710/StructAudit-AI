@@ -79,7 +79,7 @@ a{color:#0F5F6B}
   <div>做法：{{ sol.approach }}</div>
   <div>改動幅度：{{ sol.change_extent }}</div>
   {% if sol.changes %}
-  <table class="rp-dense"><thead><tr><th>rc-member-designer 欄位</th><th>參數</th><th>目前值</th><th>建議值</th><th>單位</th></tr></thead><tbody>
+  <table class="rp-dense"><thead><tr><th>{{ m.field_head }}</th><th>參數</th><th>目前值</th><th>建議值</th><th>單位</th></tr></thead><tbody>
   {% for c in sol.changes %}<tr><td class="c">{{ c.param_id or '—' }}</td><td>{{ c.label }}</td><td class="c">{{ c.current }}</td><td class="c"><b>{{ c.proposed }}</b></td><td class="c">{{ c.unit }}</td></tr>{% endfor %}
   </tbody></table>{% endif %}
   <div>修正後驗算：</div>{{ sol.verification | tex }}
@@ -144,8 +144,8 @@ a{color:#0F5F6B}
 {% if it.required_action %}<div class="rp-note"><b>應辦事項</b>：{{ it.required_action }}</div>{% endif %}
 {% else %}<div class="rp-note">無須修正。</div>
 {% endfor %}
-<div class="rp-h3">rc-member-designer 調整總結</div>
-<div class="rp-note">工具：<a href="{{ m.tool_url }}">{{ m.tool_url }}</a>{% if m.tool_summary %}<br>{{ m.tool_summary }}{% endif %}</div>
+<div class="rp-h3">{{ m.fix_title }}</div>
+<div class="rp-note">{% if m.tool_url %}工具：<a href="{{ m.tool_url }}">{{ m.tool_url }}</a>{% if m.tool_summary %}<br>{% endif %}{% endif %}{{ m.tool_summary or ('' if m.tool_url else '—') }}</div>
 {% if m.adjusted_applied %}<div class="rp-note"><b>已寫入調整後案件檔</b>（{{ m.case_name }} → 下載「調整後案件檔」後於工具中按「開啟案件」載入重算）：
   {% for x in m.adjusted_applied %}<br>・{{ x }}{% endfor %}</div>{% endif %}
 {% if m.adjusted_rejected %}<div class="rp-note"><b>未能自動套用</b>：{% for x in m.adjusted_rejected %}<br>・{{ x }}{% endfor %}</div>{% endif %}
@@ -196,7 +196,7 @@ a{color:#0F5F6B}
 <div class="rp-note">1. 本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。<br>
 2. Agent 引用之條文已逐條比對規範原文索引，查無者列於系統紀錄；條文要點與數值仍應由審查技師對照原文確認。<br>
 3. 判定用語：OK＝低風險（疑義解除）；注意＝中風險（須補充資料或修正後複核）；NG＝高風險（不符規範或影響結構安全）。<br>
-4. 建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。
+4. {{ m.recheck_note }}
 {% for n in m.notes %}<br>{{ loop.index + 4 }}. 系統紀錄：{{ n }}{% endfor %}</div>
 <div class="rp-note"><b>本報告未涵蓋、須另行檢核</b>：{% for t in m.uncovered %}({{ loop.index }}) {{ t }}{% if not loop.last %}；{% endif %}{% endfor %}。</div>
 

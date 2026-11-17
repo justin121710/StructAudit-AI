@@ -23,6 +23,15 @@
 - 示範檔腳本開啟 rc-member-designer 時要先關任務入口（`#taskSkip`）。
 - 四個工具的串接規格見 rc-member-designer `docs/INTEGRATION.md`。
 
+## 一般計算書模式與埋錯測試集（2026-11-17）
+
+- 沒有案件檔、且計算書不是 rc-member-designer 產生（`CalcBook.from_rcmd` 為假）時進入一般計算書模式：`agents/prompts.py` 的 `GENERAL_MODE` 接在各角色 System Prompt 後、
+  解決方案不寫工具欄位（`param_id` 清空）、報告標籤改為「修正項目總結」（`ReportModel.general`）。測試 `tests/test_general.py`。
+- 「內力來源」辨識 Midas Civil 與 SAP2000（rc-member-designer `loadsrc.from = 'sap'`，欄位 P／M3／M2）。
+- `bench/`：埋錯測試集（`seeds.py` 9 個 Seed，針對 `examples/sample_C1_calc.pdf`）與執行器 `python3 -m bench.run_bench`；
+  rc-member-designer 計算書版面改了導致 Seed 不適用時，`tests/test_bench.py` 會報錯，依新版文字修正樣式。
+  改審查預設輪數或模型組合前，先用它比較抓錯率、誤報候選與費用。
+
 ## 示範檔
 
 - `examples/sample_C1_*`：建築柱 C1（`make_sample_pdf.js`）。

@@ -34,6 +34,10 @@ UNCOVERED = [
     "計算書以外之構件、接頭與基礎",
     "建議方案之最終數值須於 rc-member-designer 重新計算確認",
 ]
+# 一般計算書模式（非 rc-member-designer 產生）：建議值要回原計算方式（手算、Midas、SAP2000）重算
+UNCOVERED_GENERAL = UNCOVERED[:3] + ["建議方案之最終數值須以原計算方式（手算、Excel、Midas Civil、SAP2000 等）重新計算確認"]
+RECHECK = {False: "建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。",
+           True: "建議方案須以原計算方式重新計算、確認各檢核項目符合規範後，始得作為修正依據。"}
 
 
 @dataclass
@@ -101,6 +105,19 @@ class ReportModel:
     tool_url: str = rcmd.TOOL_URL
     uncovered: list[str] = field(default_factory=lambda: list(UNCOVERED))
     sign_roles: tuple[str, ...] = SIGN_ROLES
+    general: bool = False
+
+    @property
+    def fix_title(self) -> str:
+        return "修正項目總結" if self.general else "rc-member-designer 調整總結"
+
+    @property
+    def field_head(self) -> str:
+        return "修改項目" if self.general else "rc-member-designer 欄位"
+
+    @property
+    def recheck_note(self) -> str:
+        return RECHECK[self.general]
 
 
 def report_number(session: ReviewSession) -> str:
@@ -212,7 +229,11 @@ def build_model(session: ReviewSession) -> ReportModel:
     ]
     if info.get("程式版本／雜湊"):
         source_rows.append(("計算書程式版本", info["程式版本／雜湊"]))
-    source_rows.append(("rc-member-designer 案件檔", session.case_name or "未提供（解決方案以欄位名稱表示）"))
+    general = calc.get("mode") == "general"
+    if general:
+        source_rows.append(("審查模式", "一般計算書（非 rc-member-designer 產生；解決方案以頁次、式子與建議值表示）"))
+    else:
+        source_rows.append(("rc-member-designer 案件檔", session.case_name or "未提供（解決方案以欄位名稱表示）"))
     source_rows.append(("規範原文", f"rc-member-designer specs/（{session.spec_source}）"))
 
     role_rows = [[f"第 {ps.no} 輪", ps.roles.get("A", ""), ps.roles.get("B", ""), ps.roles.get("C", "")]
@@ -250,6 +271,9 @@ def build_model(session: ReviewSession) -> ReportModel:
         clauses=_cited_clauses(session),
         notes=list(session.notes),
         cost=session.cost(),
+        tool_url="" if general else rcmd.TOOL_URL,
+        uncovered=list(UNCOVERED_GENERAL if general else UNCOVERED),
+        general=general,
     )
 
 

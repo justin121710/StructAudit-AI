@@ -196,6 +196,31 @@ python tools/build_spec_index.py /path/to/rc-member-designer
 node tools/build_rcmd_params.js /path/to/rc-member-designer/index.html
 ```
 
+## 一般計算書模式（手算＋Midas／SAP2000）
+
+上傳的計算書不是 rc-member-designer 產生、也沒有案件檔時（例如公司以手算搭配 Midas Civil 或 SAP2000 的計算書），自動改用一般計算書模式：
+
+- 外審除了構件強度與細則，另核對載重與組合、分析模型假設、程式輸出與手算採用值是否一致、單位與正負號、計算書前後數值是否相同；
+- 解決方案不對應工具欄位，改以「計算書頁次、式子、現值 → 建議值」表示，修正後驗算照常以 LaTeX 寫出；
+- 報告表頭列「審查模式：一般計算書」，「rc-member-designer 調整總結」改為「修正項目總結」，附註改為「以原計算方式重新計算確認」。
+
+內力來源段落辨識 Midas Civil 與 SAP2000（rc-member-designer 的 SAP2000 匯入，欄位 P／M3／M2）。
+
+## 埋錯測試集（bench/）
+
+多輪、多模型的審查是否真的比較會抓錯，用已知答案量：`bench/seeds.py` 在示範計算書（建築柱 C1）的擷取文字中植入 9 種錯誤
+（剪力 φ 用 0.85、P_n,max 用 0.85P_o、保護層 2 cm、容量設計剪力少乘 2、A_sh 係數 0.2、加密區間距 15 cm、D/C 前後不一致、
+主筋比 < 1 %、E_c 係數 15,000），同一錯誤在輸入表、代入式、結果一起改（S07 除外），再比較各種設定的抓錯率、誤報候選與費用：
+
+```bash
+python3 -m bench.run_bench --passes 1 3 --slots gemini:gemini-2.5-flash anthropic:claude-sonnet-5-5 openai:gpt-5-mini
+python3 -m bench.run_bench --offline          # 只驗證流程
+```
+
+結果寫到 `bench/results/`（.json＋.md，不提交）。「抓到」以關鍵字自動初判（每組至少命中一個），報告附命中原文供人工確認；
+乾淨計算書的中、高風險項目列為「誤報候選」（示範計算書本身有真正的 NG，須人工判斷）。
+預設審查輪數維持三輪；要縮減輪數或換模型組合，先用這個測試集比較（rc-member-designer docs/INTEGRATION.md §7.1）。
+
 ## 測試
 
 ```bash

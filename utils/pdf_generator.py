@@ -182,7 +182,7 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
     def solution(sol, rec=False):
         body = [B(("建議採用｜" if rec else "") + sol.label), P(f"做法：{sol.approach}"), P(f"改動幅度：{sol.change_extent}")]
         if sol.changes:
-            rows = [[B(h) for h in ("rc-member-designer 欄位", "參數", "目前值", "建議值", "單位")]]
+            rows = [[B(h) for h in (m.field_head, "參數", "目前值", "建議值", "單位")]]
             rows += [[P(c.param_id or "—"), P(c.label), P(c.current), B(c.proposed), P(c.unit)] for c in sol.changes]
             body.append(grid(rows, [0.2, 0.3, 0.15, 0.15, 0.12]))
         body.append(P("修正後驗算："))
@@ -248,8 +248,8 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
         if it.required_action:
             block.append(P(f"應辦事項：{it.required_action}", note))
         story += block
-    story.append(B("rc-member-designer 調整總結", h3))
-    story.append(P(f"工具：{m.tool_url}" + (f"\n{m.tool_summary}" if m.tool_summary else ""), note))
+    story.append(B(m.fix_title, h3))
+    story.append(P((f"工具：{m.tool_url}\n" if m.tool_url else "") + (m.tool_summary or ("—" if not m.tool_url else "")), note))
     if m.adjusted_applied:
         story.append(P("已寫入調整後案件檔：\n" + "\n".join(f"・{x}" for x in m.adjusted_applied), note))
     if m.adjusted_rejected:
@@ -312,7 +312,7 @@ def _reportlab_pdf(m: ReportModel) -> bytes:
         "1. 本報告由大型語言模型輔助產生，僅供結構技師審查參考，不得取代依法辦理之結構簽證或外審。",
         "2. Agent 引用之條文已逐條比對規範原文索引，查無者列於系統紀錄；條文要點與數值仍應由審查技師對照原文確認。",
         "3. 判定用語：OK＝低風險（疑義解除）；注意＝中風險（須補充資料或修正後複核）；NG＝高風險（不符規範或影響結構安全）。",
-        "4. 建議方案之參數須於 rc-member-designer 重新計算確認各檢核項目轉為 OK 後，始得作為修正依據。",
+        "4. " + m.recheck_note,
     ] + [f"{k}. 系統紀錄：{n}" for k, n in enumerate(m.notes, 5)]
     story.append(P("\n".join(lines), note))
     story.append(P("本報告未涵蓋、須另行檢核：" + "；".join(f"({k}) {t}" for k, t in enumerate(m.uncovered, 1)) + "。", note))
